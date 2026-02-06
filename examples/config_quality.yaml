@@ -1,4 +1,4 @@
-# 高质量训练配置示例（quality preset）
+# High-quality training configuration example (quality preset)
 config_version: "0.1.0"
 
 model:
@@ -11,27 +11,27 @@ data:
   enable_bucketing: true
 
 lora:
-  rank: 64                 # 更大的 rank，更强表达能力
+  rank: 64                 # larger rank for stronger expressiveness
   alpha: 64
 
 training:
-  preset: quality          # 使用 quality 预设
-  learning_rate: 5e-5      # 更保守的学习率
+  preset: quality          # use quality preset
+  learning_rate: 5e-5      # more conservative learning rate
   lr_scheduler: cosine
-  lr_warmup_steps: 200     # 更长的 warmup
+  lr_warmup_steps: 200     # longer warmup
   
-  batch_size: 2            # 更小的 batch，更稳定
-  gradient_accumulation: 2 # 模拟 batch=4
-  max_train_steps: 3000    # 更多训练步数
+  batch_size: 2            # smaller batch for stability
+  gradient_accumulation: 2 # effective batch = 4
+  max_train_steps: 3000    # more training steps
   
   mixed_precision: fp16
   enable_xformers: true
   
   save_every_n_steps: 500
   sample_every_n_steps: 250
-  num_sample_images: 8     # 更多Sampling validation图
+  num_sample_images: 8     # more sample images for validation
   
   seed: 42
 
 output:
-  output_dir: ./runs
+  output_dir: ./output

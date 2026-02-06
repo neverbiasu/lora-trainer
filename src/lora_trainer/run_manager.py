@@ -7,7 +7,7 @@ from typing import Any, Dict
 class RunManager:
     """Run manager"""
     
-    def __init__(self, output_dir: Path = Path("./runs")):
+    def __init__(self, output_dir: Path = Path("./output")):
         self.output_dir = output_dir
         self.run_dir: Optional[Path] = None
     

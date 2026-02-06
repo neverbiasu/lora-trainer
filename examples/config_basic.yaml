@@ -2,33 +2,33 @@
 config_version: "0.1.0"
 
 model:
-  base_model: sd15  # SD1.5 模型
+  base_model: sd15         # SD1.5 model
 
 data:
-  dataset_path: ./my_data  # 数据集路径
-  resolution: 512          # 训练分辨率
-  cache_latents: auto      # 自动决策是否 cache latent
-  enable_bucketing: true   # 启用 aspect-ratio bucketing
+  dataset_path: ./my_data  # dataset path
+  resolution: 512          # training resolution
+  cache_latents: auto      # auto-decide whether to cache latents
+  enable_bucketing: true   # enable aspect-ratio bucketing
 
 lora:
   rank: 32                 # LoRA rank
-  alpha: 32                # LoRA alpha（通常等于 rank）
+  alpha: 32                # LoRA alpha (typically equals rank)
 
 training:
-  preset: balanced         # 使用 balanced 预设
-  learning_rate: 1e-4      # 学习率
-  lr_scheduler: cosine     # 学习率调度器
-  batch_size: 4            # Batch size
-  gradient_accumulation: 1 # 梯度累积步数
-  max_train_steps: 1500    # 最大训练步数（auto 则自动计算）
+  preset: balanced         # use balanced preset
+  learning_rate: 1e-4      # learning rate
+  lr_scheduler: cosine     # LR scheduler
+  batch_size: 4            # batch size
+  gradient_accumulation: 1 # gradient accumulation steps
+  max_train_steps: 1500    # max training steps (auto = auto-calculate)
   
-  mixed_precision: fp16    # 混合精度
-  enable_xformers: true    # 启用 xformers 优化
+  mixed_precision: fp16    # mixed precision
+  enable_xformers: true    # enable xformers optimization
   
-  save_every_n_steps: 500  # Save checkpoint频率
-  sample_every_n_steps: 250 # Sampling validation频率
+  save_every_n_steps: 500  # checkpoint save frequency
+  sample_every_n_steps: 250 # sample generation frequency
   
-  seed: 42                 # 随机种子
+  seed: 42                 # random seed
 
 output:
-  output_dir: ./runs       # 输出目录
+  output_dir: ./output     # output directory
