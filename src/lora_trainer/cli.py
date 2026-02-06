@@ -73,7 +73,6 @@ def main():
 
     _validate_args(args)
 
-    # Dispatch based on mode flags
     if args.validate_only:
         # TODO: run validation pipeline
         raise NotImplementedError("validate-only mode")
