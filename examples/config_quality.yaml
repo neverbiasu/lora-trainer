@@ -1,0 +1,37 @@
+# 高质量训练配置示例（quality preset）
+config_version: "0.1.0"
+
+model:
+  base_model: sd15
+
+data:
+  dataset_path: ./my_data
+  resolution: 512
+  cache_latents: auto
+  enable_bucketing: true
+
+lora:
+  rank: 64                 # 更大的 rank，更强表达能力
+  alpha: 64
+
+training:
+  preset: quality          # 使用 quality 预设
+  learning_rate: 5e-5      # 更保守的学习率
+  lr_scheduler: cosine
+  lr_warmup_steps: 200     # 更长的 warmup
+  
+  batch_size: 2            # 更小的 batch，更稳定
+  gradient_accumulation: 2 # 模拟 batch=4
+  max_train_steps: 3000    # 更多训练步数
+  
+  mixed_precision: fp16
+  enable_xformers: true
+  
+  save_every_n_steps: 500
+  sample_every_n_steps: 250
+  num_sample_images: 8     # 更多Sampling validation图
+  
+  seed: 42
+
+output:
+  output_dir: ./runs
