@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from lora_trainer.config_manager import ConfigManager, deep_merge
+from lora_trainer.errors import LoRATrainerError
 from lora_trainer.presets import get_preset
 from lora_trainer.run_manager import RunManager
 
@@ -116,56 +117,9 @@ def _build_resolved_config(
 
     config["_config_path"] = str(args.config) if args.config else None
     config["_config_version"] = str(config.get("config_version", "0.1.0"))
-    _normalize_scalar_types(config)
-    _normalize_path_types(config)
+    config = manager.normalize_config(config)
 
     return config
-
-
-def _normalize_scalar_types(config: dict) -> None:
-    """Normalize numeric-like YAML strings in-place."""
-    numeric_fields: list[tuple[str, str, type]] = [
-        ("training", "learning_rate", float),
-        ("training", "max_train_steps", int),
-        ("training", "batch_size", int),
-        ("training", "gradient_accumulation", int),
-        ("training", "save_every_n_steps", int),
-        ("training", "sample_every_n_steps", int),
-        ("training", "seed", int),
-        ("lora", "rank", int),
-        ("lora", "alpha", float),
-        ("data", "resolution", int),
-    ]
-
-    for section, key, cast in numeric_fields:
-        section_data = config.get(section)
-        if not isinstance(section_data, dict):
-            continue
-
-        value = section_data.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped == "":
-                continue
-            try:
-                section_data[key] = cast(stripped)
-            except ValueError:
-                continue
-
-
-def _normalize_path_types(obj):
-    """Recursively convert Path objects to string for serialization."""
-    if isinstance(obj, Path):
-        return str(obj)
-    if isinstance(obj, dict):
-        for key, value in list(obj.items()):
-            obj[key] = _normalize_path_types(value)
-        return obj
-    if isinstance(obj, list):
-        for index, value in enumerate(obj):
-            obj[index] = _normalize_path_types(value)
-        return obj
-    return obj
 
 
 def main():
@@ -177,11 +131,10 @@ def main():
 
     resolved_config = _build_resolved_config(parser, args)
     config_manager = ConfigManager()
-    errors = config_manager.validate_config(resolved_config)
-    if errors:
-        print("❌ [E040] Invalid configuration", file=sys.stderr)
-        for message in errors:
-            print(f"  - {message}", file=sys.stderr)
+    try:
+        config_manager.validate_or_raise(resolved_config)
+    except LoRATrainerError as error:
+        print(str(error), file=sys.stderr)
         sys.exit(1)
 
     if args.dry_run:

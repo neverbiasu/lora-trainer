@@ -1,14 +1,14 @@
 """Run manager - handles run directory creation, snapshot saving, metadata management."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from safetensors.torch import save_file as save_safetensors
 import yaml
+from safetensors.torch import save_file as save_safetensors
 
 
 class RunManager:
@@ -34,8 +34,10 @@ class RunManager:
 
         self.save_config_snapshot(config)
         self.metadata = self.init_metadata(config)
+        self.save_metadata(self.metadata)
         self.setup_logging(self.run_dir)
         self._logger.info("Starting training run: %s", self.run_id)
+        self._logger.info("Run directory: %s", self.run_dir)
 
         return self.run_dir
 
@@ -44,6 +46,7 @@ class RunManager:
         run_dir = self._require_run_dir()
         path = run_dir / "checkpoints" / f"step_{step:04d}.safetensors"
         save_safetensors(weights, path)
+        self._logger.info("Saved checkpoint: step=%s path=%s", step, path)
         return path
 
     def save_sample(self, step: int, image: Any) -> Path:
@@ -51,6 +54,7 @@ class RunManager:
         run_dir = self._require_run_dir()
         path = run_dir / "samples" / f"step_{step:04d}.png"
         image.save(path)
+        self._logger.info("Saved sample: step=%s path=%s", step, path)
         return path
 
     def end(self, metrics: dict[str, Any]) -> None:

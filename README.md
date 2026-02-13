@@ -21,17 +21,14 @@ pip install -e .
 pip install -e ".[xformers]"
 ```
 
-### Train
+### M1 Quick Run
 
 ```bash
-# Minimal usage
-lora-trainer train --dataset ./my_data --base-model sd15
+# Preview resolved config (no side effects)
+lora-trainer --config examples/config_basic.yaml --dataset ./my_data --dry-run
 
-# Use a config file
-lora-trainer train --config config.yaml
-
-# Use a preset
-lora-trainer train --dataset ./my_data --base-model sd15 --preset quality
+# Initialize a run directory and save config snapshot
+lora-trainer --config examples/config_basic.yaml --dataset ./my_data --run-dir ./outputs
 ```
 
 ### Dataset
@@ -48,11 +45,7 @@ my_data/
 
 Each image must have a matching `.txt` caption file.
 
-### Validate Dataset
-
-```bash
-lora-trainer validate --dataset ./my_data
-```
+M1 currently includes config resolution/validation and run initialization. Training/export flows are scaffolded for the next milestone.
 
 ## Config Example
 
@@ -77,15 +70,14 @@ training:
   preset: balanced
 ```
 
-## Command Reference
+## Command Reference (M1)
 
-| Command   | Description                 |
-|-----------|-----------------------------|
-| `train`   | Train a LoRA model           |
-| `validate`| Validate a dataset           |
-| `export`  | Export to ComfyUI format     |
-| `resume`  | Resume training from a step  |
-| `info`    | Show run details             |
+Use a flat CLI (no subcommands):
+
+- `--config`: load YAML config
+- `--dry-run`: print resolved config and exit
+- `--run-dir`: set run output base directory
+- `--validate-only`: validate config and exit
 
 ## MVP Scope
 

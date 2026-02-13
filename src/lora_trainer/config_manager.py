@@ -11,6 +11,8 @@ from lora_trainer.errors import InvalidConfigError, MissingRequiredFieldError
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CONFIG_VERSION = "0.1.0"
+
 DEFAULTS: dict[str, Any] = {
     "model": {
         "base_model": None,
@@ -92,6 +94,9 @@ class ConfigManager:
     Resolves the final config by merging: DEFAULTS < YAML < CLI overrides.
     """
 
+    def __init__(self, config_version: str = DEFAULT_CONFIG_VERSION):
+        self.config_version = config_version
+
     def load_config(self, config_path: Path) -> dict[str, Any]:
         """Load configuration from YAML file."""
         if not config_path.exists():
@@ -123,7 +128,17 @@ class ConfigManager:
             cli_overrides = self.extract_cli_overrides(args)
             config = deep_merge(config, cli_overrides)
 
+        config.setdefault("config_version", self.config_version)
+        config = self.normalize_config(config)
+
         return config
+
+    def normalize_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Normalize scalar/path values so resolved config is serializable and type-stable."""
+        normalized = copy.deepcopy(config)
+        self._normalize_scalar_types(normalized)
+        self._normalize_path_types(normalized)
+        return normalized
 
     @staticmethod
     def extract_cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
@@ -146,6 +161,10 @@ class ConfigManager:
     def validate_config(self, config: dict[str, Any]) -> list[str]:
         """Validate configuration, return list of error messages."""
         errors: list[str] = []
+
+        config_version = config.get("config_version")
+        if not config_version:
+            errors.append("config_version is required")
 
         base_model = _get_nested(config, "model", "base_model")
         if not base_model:
@@ -177,4 +196,79 @@ class ConfigManager:
             if not isinstance(lr, (int, float)) or lr <= 0:
                 errors.append("training.learning_rate must be positive")
 
+        scheduler = _get_nested(config, "training", "lr_scheduler")
+        if scheduler not in {"cosine", "constant"}:
+            errors.append("training.lr_scheduler must be one of: cosine, constant")
+
+        mixed_precision = _get_nested(config, "training", "mixed_precision")
+        if mixed_precision not in {"fp16", "bf16", "fp32"}:
+            errors.append("training.mixed_precision must be one of: fp16, bf16, fp32")
+
+        cache_latents = _get_nested(config, "data", "cache_latents")
+        if cache_latents not in {"auto", True, False}:
+            errors.append("data.cache_latents must be one of: auto, true, false")
+
+        output_dir = _get_nested(config, "output", "output_dir")
+        if output_dir is None or str(output_dir).strip() == "":
+            errors.append("output.output_dir is required")
+
         return errors
+
+    def validate_or_raise(self, config: dict[str, Any]) -> None:
+        """Validate config and raise typed exceptions on failure."""
+        errors = self.validate_config(config)
+        if not errors:
+            return
+
+        for message in errors:
+            if message.endswith("is required"):
+                raise MissingRequiredFieldError(message)
+
+        raise InvalidConfigError(
+            "Invalid configuration",
+            suggestions=errors,
+        )
+
+    def _normalize_scalar_types(self, config: dict[str, Any]) -> None:
+        """Normalize numeric-like YAML strings in-place."""
+        numeric_fields: list[tuple[str, str, type]] = [
+            ("training", "learning_rate", float),
+            ("training", "max_train_steps", int),
+            ("training", "batch_size", int),
+            ("training", "gradient_accumulation", int),
+            ("training", "save_every_n_steps", int),
+            ("training", "sample_every_n_steps", int),
+            ("training", "seed", int),
+            ("lora", "rank", int),
+            ("lora", "alpha", float),
+            ("data", "resolution", int),
+        ]
+
+        for section, key, cast in numeric_fields:
+            section_data = config.get(section)
+            if not isinstance(section_data, dict):
+                continue
+
+            value = section_data.get(key)
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped == "":
+                    continue
+                try:
+                    section_data[key] = cast(stripped)
+                except ValueError:
+                    continue
+
+    def _normalize_path_types(self, obj: Any):
+        """Recursively convert Path objects to string for serialization."""
+        if isinstance(obj, Path):
+            return str(obj)
+        if isinstance(obj, dict):
+            for key, value in list(obj.items()):
+                obj[key] = self._normalize_path_types(value)
+            return obj
+        if isinstance(obj, list):
+            for index, value in enumerate(obj):
+                obj[index] = self._normalize_path_types(value)
+            return obj
+        return obj

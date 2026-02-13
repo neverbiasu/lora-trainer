@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run unit tests (M1 core)
+        env:
+          PYTHONPATH: src
+        run: |
+          pytest -q tests/test_config_manager.py tests/test_run_manager.py
+
+      - name: Run lint
+        run: |
+          ruff check \
+            src/lora_trainer/cli.py \
+            src/lora_trainer/config_manager.py \
+            src/lora_trainer/run_manager.py \
+            tests/test_config_manager.py \
+            tests/test_run_manager.py
+
+      - name: Check docs/design for executable code outside fenced blocks
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import re
+          import sys
+          from pathlib import Path
+
+          root = Path("docs/design")
+          if not root.exists():
+              print("docs/design not found, skip")
+              raise SystemExit(0)
+
+          pattern = re.compile(
+              r"^\s*(from\s+[\w\.]+\s+import\s+.+|import\s+[\w\.]+|def\s+\w+\s*\(|class\s+\w+\s*[:\(]|if\s+__name__\s*==\s*['\"]__main__['\"])"
+          )
+
+          violations: list[str] = []
+
+          for path in root.rglob("*.md"):
+              in_fence = False
+              for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                  stripped = line.strip()
+                  if stripped.startswith("```"):
+                      in_fence = not in_fence
+                      continue
+                  if in_fence:
+                      continue
+                  if pattern.search(line):
+                      violations.append(f"{path}:{line_no}: {line.strip()}")
+
+          if violations:
+              print("Found potential executable code in docs/design outside fenced blocks:")
+              for item in violations:
+                  print(f"- {item}")
+              raise SystemExit(1)
+
+          print("docs/design executable-code check passed")
+          PY
