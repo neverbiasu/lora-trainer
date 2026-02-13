@@ -1,7 +1,13 @@
-"""CLI entry point - flat argparse, no subcommands"""
+"""CLI entry point - flat argparse, no subcommands."""
 import argparse
 import sys
 from pathlib import Path
+
+import yaml
+
+from lora_trainer.config_manager import ConfigManager, deep_merge
+from lora_trainer.presets import get_preset
+from lora_trainer.run_manager import RunManager
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -39,6 +45,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     output = parser.add_argument_group("Output")
     output.add_argument("--output-dir", type=Path, default=Path("./output"), help="Output directory")
+    output.add_argument("--run-dir", type=Path, help="Base directory for run artifacts")
     output.add_argument("--save-every-n-steps", type=int, default=500, help="Checkpoint save frequency")
     output.add_argument("--sample-every-n-steps", type=int, default=250, help="Sample generation frequency")
     output.add_argument("--sample-prompts", type=Path, help="Sample prompt file")
@@ -66,6 +73,101 @@ def _validate_args(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _build_explicit_namespace(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> argparse.Namespace:
+    """Return a namespace with only explicitly provided CLI values."""
+    defaults: dict[str, object] = {
+        action.dest: action.default
+        for action in parser._actions
+        if action.dest != "help"
+    }
+    explicit: dict[str, object] = {}
+
+    for key, value in vars(args).items():
+        default = defaults.get(key)
+        if value != default:
+            explicit[key] = value
+
+    return argparse.Namespace(**explicit)
+
+
+def _build_resolved_config(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> dict:
+    """Resolve final config: defaults < YAML < preset < explicit CLI."""
+    manager = ConfigManager()
+
+    config = manager.resolve(config_path=args.config, args=None)
+
+    if args.preset:
+        config = deep_merge(config, get_preset(args.preset))
+
+    explicit_args = _build_explicit_namespace(parser, args)
+    cli_overrides = manager.extract_cli_overrides(explicit_args)
+    config = deep_merge(config, cli_overrides)
+
+    if args.run_dir is not None:
+        config.setdefault("export", {})["output_dir"] = str(args.run_dir)
+    elif "output" in config and "output_dir" in config["output"]:
+        config.setdefault("export", {})["output_dir"] = config["output"]["output_dir"]
+
+    config["_config_path"] = str(args.config) if args.config else None
+    config["_config_version"] = str(config.get("config_version", "0.1.0"))
+    _normalize_scalar_types(config)
+    _normalize_path_types(config)
+
+    return config
+
+
+def _normalize_scalar_types(config: dict) -> None:
+    """Normalize numeric-like YAML strings in-place."""
+    numeric_fields: list[tuple[str, str, type]] = [
+        ("training", "learning_rate", float),
+        ("training", "max_train_steps", int),
+        ("training", "batch_size", int),
+        ("training", "gradient_accumulation", int),
+        ("training", "save_every_n_steps", int),
+        ("training", "sample_every_n_steps", int),
+        ("training", "seed", int),
+        ("lora", "rank", int),
+        ("lora", "alpha", float),
+        ("data", "resolution", int),
+    ]
+
+    for section, key, cast in numeric_fields:
+        section_data = config.get(section)
+        if not isinstance(section_data, dict):
+            continue
+
+        value = section_data.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == "":
+                continue
+            try:
+                section_data[key] = cast(stripped)
+            except ValueError:
+                continue
+
+
+def _normalize_path_types(obj):
+    """Recursively convert Path objects to string for serialization."""
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, dict):
+        for key, value in list(obj.items()):
+            obj[key] = _normalize_path_types(value)
+        return obj
+    if isinstance(obj, list):
+        for index, value in enumerate(obj):
+            obj[index] = _normalize_path_types(value)
+        return obj
+    return obj
+
+
 def main():
     """CLI main entry point"""
     parser = create_parser()
@@ -73,21 +175,34 @@ def main():
 
     _validate_args(args)
 
+    resolved_config = _build_resolved_config(parser, args)
+    config_manager = ConfigManager()
+    errors = config_manager.validate_config(resolved_config)
+    if errors:
+        print("❌ [E040] Invalid configuration", file=sys.stderr)
+        for message in errors:
+            print(f"  - {message}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.dry_run:
+        print(yaml.safe_dump(resolved_config, sort_keys=False))
+        return
+
     if args.validate_only:
-        # TODO: run validation pipeline
-        raise NotImplementedError("validate-only mode")
+        print("✅ config validation passed")
+        return
     elif args.export_only:
-        # TODO: load run, export model
-        raise NotImplementedError("export-only mode")
-    elif args.dry_run:
-        # TODO: resolve config, print preview
-        raise NotImplementedError("dry-run mode")
+        print("❌ [E042] export-only mode is not implemented yet", file=sys.stderr)
+        sys.exit(2)
     elif args.resume:
-        # TODO: load checkpoint, continue training
-        raise NotImplementedError("resume mode")
+        print("❌ [E042] resume mode is not implemented yet", file=sys.stderr)
+        sys.exit(2)
     else:
-        # Default: validate → train → export
-        raise NotImplementedError("training pipeline")
+        export_output_dir = Path(resolved_config.get("export", {}).get("output_dir", "./output"))
+        run_manager = RunManager(output_dir=export_output_dir)
+        run_dir = run_manager.start(resolved_config)
+        print(f"✅ run initialized: {run_dir}")
+        print("ℹ️ training pipeline is not implemented yet")
 
 
 if __name__ == "__main__":
