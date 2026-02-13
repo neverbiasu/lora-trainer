@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from lora_trainer.errors import InvalidConfigError, MissingRequiredFieldError
+from src.lora_trainer.errors import InvalidConfigError, MissingRequiredFieldError
 
 logger = logging.getLogger(__name__)
 

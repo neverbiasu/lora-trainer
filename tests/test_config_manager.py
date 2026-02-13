@@ -6,8 +6,8 @@ import argparse
 
 import pytest
 
-from lora_trainer.config_manager import ConfigManager
-from lora_trainer.errors import InvalidConfigError, MissingRequiredFieldError
+from src.lora_trainer.config_manager import ConfigManager
+from src.lora_trainer.errors import InvalidConfigError, MissingRequiredFieldError
 
 
 def test_config_manager_init() -> None:

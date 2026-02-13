@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from lora_trainer.run_manager import RunManager
+from src.lora_trainer.run_manager import RunManager
 
 
 def _build_config(output_dir: Path) -> dict:
