@@ -45,6 +45,16 @@ my_data/
 
 Each image must have a matching `.txt` caption file.
 
+**Quick test dataset**: Use [Fern (Frieren) character screenshots - purple hair mage](docs/fern_dataset_guide.md) for rapid functional validation:
+```bash
+# 1. Download ~100 Fern screenshots manually (~10 min)
+# 2. Process them automatically
+python scripts/download_fern_dataset.py --skip-download
+# 3. Run test training
+lora-trainer --config examples/config_fern_test.yaml \
+             --dataset ./fern_dataset --run-dir ./runs/test_fern
+```
+
 M1 currently includes config resolution/validation and run initialization. Training/export flows are scaffolded for the next milestone.
 
 ## Config Example
