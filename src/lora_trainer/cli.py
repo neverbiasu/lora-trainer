@@ -1,5 +1,6 @@
 """CLI entry point - flat argparse, no subcommands."""
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -9,6 +10,10 @@ from src.lora_trainer.config_manager import ConfigManager, deep_merge
 from src.lora_trainer.errors import LoRATrainerError
 from src.lora_trainer.presets import get_preset
 from src.lora_trainer.run_manager import RunManager
+from src.lora_trainer.trainer import Trainer
+
+
+logger = logging.getLogger(__name__)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -151,11 +156,34 @@ def main():
         print("❌ [E042] resume mode is not implemented yet", file=sys.stderr)
         sys.exit(2)
     else:
-        export_output_dir = Path(resolved_config.get("export", {}).get("output_dir", "./output"))
-        run_manager = RunManager(output_dir=export_output_dir)
-        run_dir = run_manager.start(resolved_config)
-        print(f"✅ run initialized: {run_dir}")
-        print("ℹ️ training pipeline is not implemented yet")
+        logging.basicConfig(
+            level=logging.INFO if not args.verbose else logging.DEBUG,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+        trainer = None
+        try:
+            trainer = Trainer(resolved_config)
+            run_dir = trainer.start()
+            print(f"✅ run initialized: {run_dir}")
+
+            trainer.train()
+            print(f"✅ training completed")
+
+            trainer.end()
+            print(f"✅ exported final model")
+
+        except KeyboardInterrupt:
+            print("\n⚠️  training interrupted", file=sys.stderr)
+            if trainer is not None:
+                trainer.end()
+            sys.exit(130)
+        except Exception as error:
+            print(f"❌ training failed: {error}", file=sys.stderr)
+            if args.verbose:
+                import traceback
+                traceback.print_exc()
+            sys.exit(1)
 
 
 if __name__ == "__main__":
