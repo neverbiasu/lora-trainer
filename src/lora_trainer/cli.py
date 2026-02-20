@@ -142,6 +142,11 @@ def main():
         print(str(error), file=sys.stderr)
         sys.exit(1)
 
+    logging.basicConfig(
+        level=logging.INFO if not args.verbose else logging.DEBUG,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
     if args.dry_run:
         print(yaml.safe_dump(resolved_config, sort_keys=False))
         return
@@ -149,41 +154,33 @@ def main():
     if args.validate_only:
         print("✅ config validation passed")
         return
-    elif args.export_only:
-        print("❌ [E042] export-only mode is not implemented yet", file=sys.stderr)
-        sys.exit(2)
-    elif args.resume:
-        print("❌ [E042] resume mode is not implemented yet", file=sys.stderr)
-        sys.exit(2)
-    else:
-        logging.basicConfig(
-            level=logging.INFO if not args.verbose else logging.DEBUG,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
 
-        trainer = None
-        try:
-            trainer = Trainer(resolved_config)
-            run_dir = trainer.start()
-            print(f"✅ run initialized: {run_dir}")
+    trainer = None
+    try:
+        trainer = Trainer(resolved_config)
 
-            trainer.train()
-            print(f"✅ training completed")
-
+        if args.export_only:
+            # load weights then export without training
+            run_dir = trainer.start(resume=str(args.resume))
+            logger.info("Export-only: run_dir=%s", run_dir)
             trainer.end()
-            print(f"✅ exported final model")
+            print("✅ exported final model")
+        elif args.resume:
+            trainer.train(resume=str(args.resume))
+            print("✅ training (resumed) completed")
+        else:
+            trainer.train()
+            print("✅ training completed")
 
-        except KeyboardInterrupt:
-            print("\n⚠️  training interrupted", file=sys.stderr)
-            if trainer is not None:
-                trainer.end()
-            sys.exit(130)
-        except Exception as error:
-            print(f"❌ training failed: {error}", file=sys.stderr)
-            if args.verbose:
-                import traceback
-                traceback.print_exc()
-            sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n⚠️  training interrupted", file=sys.stderr)
+        sys.exit(130)
+    except Exception as error:
+        print(f"❌ training failed: {error}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -253,7 +253,14 @@ class Trainer:
 
         run_dir = cast(RunManager, self.run_manager).run_dir
         export_path = cast(Path, run_dir) / "export" / "lora_final.safetensors"
-        self.lora_adapter.export_weights(str(export_path))
+        base_model = self.config.get("model", {}).get("base_model", "sd15")
+        metadata = {
+            "rank": str(self.config["lora"]["rank"]),
+            "alpha": str(self.config["lora"]["alpha"]),
+            "base_model": base_model,
+            "format_version": "1.0",
+        }
+        self.lora_adapter.export_weights(str(export_path), metadata=metadata)
         logger.info("Exported final LoRA weights to %s", export_path)
 
         metrics = {
