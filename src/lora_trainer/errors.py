@@ -4,12 +4,12 @@
 class LoRATrainerError(Exception):
     """Base error class"""
     error_code: str = "E000"
-    
+
     def __init__(self, message: str, suggestions: list = None):
         self.message = message
         self.suggestions = suggestions or []
         super().__init__(self.format_error())
-    
+
     def format_error(self) -> str:
         """Format error message"""
         msg = f"❌ [{self.error_code}] {self.message}"

@@ -21,10 +21,10 @@ class VRAMEstimate:
 
 class HyperparamPolicy:
     """Hyperparameter policy manager"""
-    
+
     def __init__(self, model_type: str = "sd15"):
         self.model_type = model_type
-    
+
     def recommend_defaults(
         self,
         dataset_size: int,
@@ -33,17 +33,17 @@ class HyperparamPolicy:
         """Recommend default parameters"""
         # TODO: implement parameter recommendation
         raise NotImplementedError
-    
+
     def validate_config(self, config: Dict[str, Any]) -> ValidationResult:
         """Validate parameter constraints"""
         # TODO: implement parameter validation
         raise NotImplementedError
-    
+
     def estimate_vram(self, config: Dict[str, Any]) -> VRAMEstimate:
         """Estimate VRAM requirements"""
         # TODO: implement VRAM estimation
         raise NotImplementedError
-    
+
     def auto_adjust(
         self,
         config: Dict[str, Any],

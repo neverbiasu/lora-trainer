@@ -4,8 +4,8 @@ from typing import Any, Optional, cast
 
 import torch
 import torch.nn as nn
-from safetensors.torch import save_file as save_safetensors
 from safetensors.torch import load_file as load_safetensors
+from safetensors.torch import save_file as save_safetensors
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +182,12 @@ class LoRAAdapter(nn.Module):
 
     def export_weights(self, save_path: str, metadata: Optional[dict] = None) -> None:
         """Export LoRA weights to safetensors or torch format.
-        
+
         Reference: sd-scripts networks/lora.py:1255-1283 (save_weights).
         Supports both .safetensors and .pt formats.
         """
         state_dict = self.state_dict()
-        
+
         if save_path.endswith(".safetensors"):
             if metadata is None:
                 metadata = {}

@@ -5,19 +5,17 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-import torchvision.transforms.functional as TF
-
 import torch
 import torch.nn as nn
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
+import torchvision.transforms.functional as TF
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import ConstantLR, CosineAnnealingLR
 
 from src.lora_trainer.data_loader import create_data_loader
 from src.lora_trainer.lora import LoRAAdapter
 from src.lora_trainer.model_adapter import SD15ModelAdapter
 from src.lora_trainer.run_manager import RunManager
-
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +125,7 @@ class Trainer:
         """Resolve model path from config."""
         if "model" in self.config and "model_path" in self.config["model"]:
             return self.config["model"]["model_path"]
-        
+
         base_model = self.config.get("model", {}).get("base_model", "sd15")
         if base_model == "sd15":
             return "runwayml/stable-diffusion-v1-5"
@@ -209,7 +207,7 @@ class Trainer:
             self.optimizer.zero_grad()
 
         return loss.item()
-    
+
     def validate(self, step: int) -> None:
         """Generate a fixed-prompt sample and save to run/samples/."""
         val_cfg = self.config.get("validation")
@@ -230,7 +228,7 @@ class Trainer:
         pil_image = TF.to_pil_image(image_tensor)
         self.run_manager.save_sample(step, pil_image)
         logger.info("step=%d sample saved", step)
-        
+
     def save_checkpoint(self, step: int) -> None:
         """Save LoRA weights and step metadata."""
         if self.lora_adapter is None or self.run_manager is None:

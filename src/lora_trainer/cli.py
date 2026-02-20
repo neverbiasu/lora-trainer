@@ -9,9 +9,7 @@ import yaml
 from src.lora_trainer.config_manager import ConfigManager, deep_merge
 from src.lora_trainer.errors import LoRATrainerError
 from src.lora_trainer.presets import get_preset
-from src.lora_trainer.run_manager import RunManager
 from src.lora_trainer.trainer import Trainer
-
 
 logger = logging.getLogger(__name__)
 

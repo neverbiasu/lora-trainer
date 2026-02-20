@@ -1,27 +1,34 @@
 """ModelAdapter - model loading and conditioning construction"""
+import logging
 from pathlib import Path
 from typing import Any, List, Mapping, Tuple, cast
-from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
-from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
-from diffusers.pipelines.stable_diffusion.convert_from_ckpt import create_unet_diffusers_config, create_vae_diffusers_config, convert_ldm_unet_checkpoint, convert_ldm_vae_checkpoint, convert_ldm_clip_checkpoint
-from diffusers.loaders.single_file_utils import load_single_file_checkpoint
-from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextConfig
-import torchvision.transforms.functional as TF
-from safetensors.torch import load_file
+
 import torch
 import torch.nn as nn
-import logging
+import torchvision.transforms.functional as TF
+from diffusers.loaders.single_file_utils import load_single_file_checkpoint
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
+from diffusers.pipelines.stable_diffusion.convert_from_ckpt import (
+    convert_ldm_clip_checkpoint,
+    convert_ldm_unet_checkpoint,
+    convert_ldm_vae_checkpoint,
+    create_unet_diffusers_config,
+    create_vae_diffusers_config,
+)
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from safetensors.torch import load_file
+from transformers import CLIPTextConfig, CLIPTextModel, CLIPTokenizer
 
 logger = logging.getLogger(__name__)
 
 def load_checkpoint_with_text_encoder_conversion(ckpt_path: str, device: torch.device) -> Tuple:
     """Load checkpoint and convert text encoder key format for compatibility.
-    
+
     Handles models where text_model structure differs from standard format.
     """
-    TEXT_ENCODER_KEY_REPLACEMENTS = [
+    text_encoder_key_replacements = [
         ("cond_stage_model.transformer.embeddings.", "cond_stage_model.transformer.text_model.embeddings."),
         ("cond_stage_model.transformer.encoder.", "cond_stage_model.transformer.text_model.encoder."),
         ("cond_stage_model.transformer.final_layer_norm.", "cond_stage_model.transformer.text_model.final_layer_norm."),
@@ -42,7 +49,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path: str, device: torch.d
                 checkpoint = None
 
     key_reps = []
-    for rep_from, rep_to in TEXT_ENCODER_KEY_REPLACEMENTS:
+    for rep_from, rep_to in text_encoder_key_replacements:
         for key in state_dict.keys():
             if key.startswith(rep_from):
                 new_key = rep_to + key[len(rep_from):]
@@ -56,27 +63,27 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path: str, device: torch.d
 
 class ModelAdapter:
     """Model adapter base class"""
-    
+
     def __init__(self, model_name_or_path: str):
         self.model_name_or_path = model_name_or_path
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     def load_models(self) -> Tuple[nn.Module, ...]:
         """Load model components (VAE, UNet, TE)."""
         raise NotImplementedError
-        
+
     def get_target_modules(self) -> List[str]:
         """Return LoRA injection target modules"""
         raise NotImplementedError
-    
+
     def encode_prompt(self, prompts: List[str]) -> torch.Tensor:
         """Encode text"""
         raise NotImplementedError
-    
+
     def encode_image(self, images: torch.Tensor) -> torch.Tensor:
         """Encode image to latent"""
         raise NotImplementedError
-    
+
     def decode_latent(self, latents: torch.Tensor) -> torch.Tensor:
         """Decode latent to image"""
         raise NotImplementedError
@@ -101,14 +108,14 @@ class ModelAdapter:
 
 class SD15ModelAdapter(ModelAdapter):
     """SD1.5 model adapter (MVP implementation)"""
-    
+
     def __init__(self, model_name_or_path: str = "runwayml/stable-diffusion-v1-5"):
         super().__init__(model_name_or_path)
         self.vae: AutoencoderKL | None = None
         self.unet: UNet2DConditionModel | None = None
         self.text_encoder: CLIPTextModel | None = None
         self.tokenizer: CLIPTokenizer | None = None
-    
+
     def load_models(self) -> Tuple[nn.Module, ...]:
         """Load SD1.5 model components (VAE, UNet, text encoder)."""
         if self._is_checkpoint(Path(self.model_name_or_path)):
@@ -179,11 +186,11 @@ class SD15ModelAdapter(ModelAdapter):
         assert self.unet is not None
         assert self.text_encoder is not None
         return self.vae, self.unet, self.text_encoder
-    
+
     def get_target_modules(self) -> List[str]:
         """SD1.5 LoRA target modules"""
         return ["to_q", "to_k", "to_v", "to_out.0"]
-    
+
     def encode_prompt(self, prompts: List[str]) -> torch.Tensor:
         """Encode text to embedding"""
         self._ensure_loaded()
@@ -206,7 +213,7 @@ class SD15ModelAdapter(ModelAdapter):
                 attention_mask=attention_mask,
             ).last_hidden_state
         return embeddings
-    
+
     def encode_image(self, images: torch.Tensor) -> torch.Tensor:
         """Encode image to latent"""
         self._ensure_loaded()
@@ -228,7 +235,7 @@ class SD15ModelAdapter(ModelAdapter):
             scaling_factor = float(getattr(self.vae.config, "scaling_factor", 0.18215))
             latents = cast(torch.Tensor, latent_sample) * scaling_factor
         return latents
-    
+
     def decode_latent(self, latents: torch.Tensor) -> torch.Tensor:
         """Decode latent to image"""
         self._ensure_loaded()

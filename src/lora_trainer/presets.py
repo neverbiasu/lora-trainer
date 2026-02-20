@@ -1,7 +1,6 @@
 """Presets - quick/balanced/quality three-tier preset definitions"""
 from typing import Any, Dict
 
-
 # Preset definitions
 PRESETS = {
     "quick": {
@@ -58,28 +57,28 @@ PRESETS = {
 def get_preset(preset_name: str) -> Dict[str, Any]:
     """
     Get preset configuration
-    
+
     Args:
         preset_name: Preset name ("quick" / "balanced" / "quality")
-    
+
     Returns:
         Preset configuration dictionary
     """
     if preset_name not in PRESETS:
         raise ValueError(f"Unknown preset: {preset_name}")
-    
+
     return PRESETS[preset_name].copy()
 
 
 def calculate_max_steps(dataset_size: int, preset: str, batch_size: int = 4) -> int:
     """
     Adaptively calculate training steps based on dataset size
-    
+
     Args:
         dataset_size: Number of images in dataset
         preset: Preset name
         batch_size: batch size
-    
+
     Returns:
         Recommended training steps
     """
