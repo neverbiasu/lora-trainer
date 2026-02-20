@@ -1,13 +1,17 @@
 """Trainer - training orchestration layer"""
+import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, cast
+
+import torchvision.transforms.functional as TF
 
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
-from diffusers.schedulers import DDPMScheduler
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from src.lora_trainer.data_loader import create_data_loader
 from src.lora_trainer.lora import LoRAAdapter
@@ -38,8 +42,9 @@ class Trainer:
 
         self.run_manager: RunManager | None = None
         self.global_step = 0
+        self.last_loss = 0.0
 
-    def start(self) -> Path:
+    def start(self, resume: str | None = None) -> Path:
         """Initialize training: load models, inject LoRA, setup optimizer."""
         model_path = self._resolve_model_path()
         self.config.setdefault("model", {})["model_path"] = model_path
@@ -100,6 +105,21 @@ class Trainer:
             timestep_spacing="leading",
         )
 
+        if resume is not None:
+            logger.info("Resuming from checkpoint: %s", resume)
+            cast(LoRAAdapter, self.lora_adapter).load_weights(resume, strict=False)
+            meta_path = Path(resume).with_suffix(".json")
+            if meta_path.exists():
+                with open(meta_path) as f:
+                    ckpt_meta = json.load(f)
+                self.global_step = ckpt_meta.get("global_step", 0)
+                logger.info("Restored global_step=%d from checkpoint metadata", self.global_step)
+            else:
+                m = re.search(r"step_(\d+)", Path(resume).stem)
+                if m:
+                    self.global_step = int(m.group(1))
+                    logger.info("Restored global_step=%d from filename", self.global_step)
+
         logger.info("Training ready: max_steps=%d device=%s", max_steps, self.device)
         return run_dir
 
@@ -113,86 +133,131 @@ class Trainer:
             return "runwayml/stable-diffusion-v1-5"
         raise ValueError(f"Unsupported base_model: {base_model}")
 
-    def train(self) -> None:
-        """Main training loop."""
-        if self.optimizer is None or self.data_loader is None:
-            raise RuntimeError("call start() first")
+    def train(self, resume: str | None = None) -> None:
+        """Main training loop - manages start -> loop -> end lifecycle."""
+        self.start(resume=resume)
 
         max_steps = self.config["training"].get("max_steps") or self.config["training"].get("max_train_steps")
         if max_steps is None:
             num_epochs = self.config["training"].get("num_epochs", 10)
             max_steps = num_epochs * len(self.data_loader)
 
-        save_every_n_steps = self.config["training"].get("save_every_n_steps", 500)
+        save_every = self.config["training"].get("save_every_n_steps", 500)
+        validate_every = self.config.get("validation", {}).get("every_n_steps", 0)
+        optimizer = cast(torch.optim.Optimizer, self.optimizer)
+        run_manager = cast(RunManager, self.run_manager)
 
-        for epoch in range(self.config["training"].get("num_epochs", 10)):
-            for batch in self.data_loader:
-                if self.global_step >= max_steps:
-                    logger.info("Reached max_steps=%d, stopping training", max_steps)
-                    return
+        try:
+            for _epoch in range(self.config["training"].get("num_epochs", 10)):
+                for batch in self.data_loader:
+                    if self.global_step >= max_steps:
+                        logger.info("Reached max_steps=%d, stopping training", max_steps)
+                        break
 
-                loss = self.train_step(batch)
-                self.run_manager.update_training_metrics(
-                    self.global_step, {"loss": loss, "lr": self.optimizer.param_groups[0]["lr"]}
-                )
+                    loss = self.train_step(batch)
+                    self.last_loss = loss
+                    run_manager.update_training_metrics(
+                        self.global_step, {"loss": loss, "lr": optimizer.param_groups[0]["lr"]}
+                    )
 
-                if self.global_step % save_every_n_steps == 0:
-                    self.save_checkpoint(self.global_step)
+                    if validate_every > 0 and self.global_step % validate_every == 0:
+                        self.validate(self.global_step)
+                    if self.global_step % save_every == 0:
+                        self.save_checkpoint(self.global_step)
 
-                self.global_step += 1
+                    self.global_step += 1
+                else:
+                    continue
+                break
+        finally:
+            self.end()
 
-    def train_step(self, batch: dict[str, Any]) -> float:
+    def train_step(self, batch: tuple[Any, ...]) -> float:
         """Single training step."""
         if self.optimizer is None or self.lora_adapter is None or self.unet is None or self.vae is None:
             raise RuntimeError("call start() first")
         if self.model_adapter is None or self.noise_scheduler is None:
             raise RuntimeError("model_adapter or noise_scheduler not initialized")
 
-        images, captions = batch
-        images = images.to(self.device)
+        images_tensor, captions = batch[0], batch[1]
+        images = cast(torch.Tensor, images_tensor).to(self.device)
 
         with torch.no_grad():
             latents = self.model_adapter.encode_image(images)
 
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device)
-
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        noise_scheduler = cast(DDPMScheduler, self.noise_scheduler)
+        timesteps = torch.randint(
+            0, int(noise_scheduler.config["num_train_timesteps"]), (bsz,), device=self.device
+        )
+        noisy_latents = noise_scheduler.add_noise(latents, noise, cast(Any, timesteps))
 
         with torch.no_grad():
             text_embeddings = self.model_adapter.encode_prompt(list(captions))
 
-        model_pred = self.unet(noisy_latents, timesteps, text_embeddings).sample
+        model_pred = cast(Any, self.unet(noisy_latents, timesteps, text_embeddings)).sample
 
         loss = torch.nn.functional.mse_loss(model_pred, noise)
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.scheduler.step()
+        grad_accum = self.config["training"].get("gradient_accumulation", 1)
+        (loss / grad_accum).backward()
+
+        if (self.global_step + 1) % grad_accum == 0:
+            self.optimizer.step()
+            self.scheduler.step()
+            self.optimizer.zero_grad()
 
         return loss.item()
+    
+    def validate(self, step: int) -> None:
+        """Generate a fixed-prompt sample and save to run/samples/."""
+        val_cfg = self.config.get("validation")
+        if not val_cfg:
+            return
+        if self.model_adapter is None or self.run_manager is None:
+            raise RuntimeError("call start() first")
 
+        image_tensor = self.model_adapter.generate(
+            prompt=val_cfg.get("prompt", ""),
+            negative_prompt=val_cfg.get("negative_prompt", ""),
+            seed=val_cfg.get("seed", 0),
+            num_inference_steps=val_cfg.get("num_inference_steps", 20),
+            guidance_scale=val_cfg.get("guidance_scale", 7.5),
+            width=val_cfg.get("width", 512),
+            height=val_cfg.get("height", 512),
+        )
+        pil_image = TF.to_pil_image(image_tensor)
+        self.run_manager.save_sample(step, pil_image)
+        logger.info("step=%d sample saved", step)
+        
     def save_checkpoint(self, step: int) -> None:
-        """Save LoRA checkpoint."""
+        """Save LoRA weights and step metadata."""
         if self.lora_adapter is None or self.run_manager is None:
             raise RuntimeError("call start() first")
 
-        weights = self.lora_adapter.state_dict()
-        self.run_manager.save_checkpoint(step, weights)
+        weights_path = self.run_manager.save_checkpoint(step, self.lora_adapter.state_dict())
+        meta = {
+            "global_step": step,
+            "rank": self.config["lora"]["rank"],
+            "alpha": self.config["lora"]["alpha"],
+        }
+        meta_path = Path(str(weights_path).replace(".safetensors", ".json"))
+        meta_path.write_text(json.dumps(meta, indent=2))
+        logger.info("Saved checkpoint: step=%d path=%s", step, weights_path)
 
     def end(self) -> None:
         """Export final LoRA model."""
         if self.lora_adapter is None or self.run_manager is None:
             raise RuntimeError("call start() first")
 
-        export_path = self.run_manager.run_dir / "export" / "lora_final.safetensors"
+        run_dir = cast(RunManager, self.run_manager).run_dir
+        export_path = cast(Path, run_dir) / "export" / "lora_final.safetensors"
         self.lora_adapter.export_weights(str(export_path))
         logger.info("Exported final LoRA weights to %s", export_path)
 
         metrics = {
             "total_steps": self.global_step,
-            "final_loss": 0.0,
+            "final_loss": self.last_loss,
         }
         self.run_manager.end(metrics)

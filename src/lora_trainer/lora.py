@@ -1,10 +1,13 @@
 """LoRA implementation for Stable Diffusion fine-tuning."""
+import logging
 from typing import Any, Optional, cast
 
 import torch
 import torch.nn as nn
 from safetensors.torch import save_file as save_safetensors
+from safetensors.torch import load_file as load_safetensors
 
+logger = logging.getLogger(__name__)
 
 class LoRAModule(nn.Module):
     """Single LoRA layer: ΔW = scale * up(down(x)), scale = alpha / rank."""
@@ -137,6 +140,35 @@ class LoRAAdapter(nn.Module):
             result["total_skipped"] += report["skipped_count"]
 
         return result
+
+    def load_weights(self, weights_path: str, strict: bool = False) -> None:
+        """Load LoRA weights from a checkpoint (safetensors or torch).
+
+        Keys in the checkpoint must match the format produced by export_weights,
+        i.e. the full state_dict layout with 'lora_modules.' prefix.
+        """
+        if weights_path.endswith(".safetensors"):
+            state_dict = dict(load_safetensors(weights_path))
+        elif weights_path.endswith((".pt", ".pth", ".bin", ".ckpt")):
+            checkpoint = torch.load(weights_path, map_location="cpu", weights_only=True)
+            state_dict = dict(checkpoint)
+        else:
+            raise ValueError(
+                f"Unsupported checkpoint format: '{weights_path}'. "
+                "Expected .safetensors, .pt, .pth, .bin, or .ckpt."
+            )
+
+        incompatible = self.load_state_dict(state_dict, strict=strict)
+        if incompatible.missing_keys:
+            logger.warning(
+                "load_weights: missing keys in checkpoint: %s",
+                incompatible.missing_keys,
+            )
+        if incompatible.unexpected_keys:
+            logger.warning(
+                "load_weights: unexpected keys in checkpoint: %s",
+                incompatible.unexpected_keys,
+            )
 
     def remove_injection(self) -> None:
         """Remove all forward hooks registered during LoRA injection."""

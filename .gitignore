@@ -43,6 +43,7 @@ htmlcov/
 # Training outputs
 runs/
 outputs/
+output/
 *.safetensors
 *.ckpt
 *.pth
@@ -51,11 +52,14 @@ outputs/
 .cache/
 models/
 
-# Documentation
-docs/
-
 # Local reference repos and helper scripts
-clone_references.sh
+docs/references/
+docs/clone_references.sh
+
+# Raw example assets (large files)
+examples/fern/raw/
+examples/fern/dataset_512/
+fern_dataset/
 
 # Jupyter
 .ipynb_checkpoints/

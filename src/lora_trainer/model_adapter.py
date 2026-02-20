@@ -6,7 +6,9 @@ from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
 from diffusers.pipelines.stable_diffusion.convert_from_ckpt import create_unet_diffusers_config, create_vae_diffusers_config, convert_ldm_unet_checkpoint, convert_ldm_vae_checkpoint, convert_ldm_clip_checkpoint
 from diffusers.loaders.single_file_utils import load_single_file_checkpoint
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextConfig
+import torchvision.transforms.functional as TF
 from safetensors.torch import load_file
 import torch
 import torch.nn as nn
@@ -77,6 +79,19 @@ class ModelAdapter:
     
     def decode_latent(self, latents: torch.Tensor) -> torch.Tensor:
         """Decode latent to image"""
+        raise NotImplementedError
+
+    def generate(
+        self,
+        prompt: str,
+        negative_prompt: str = "",
+        seed: int = 0,
+        num_inference_steps: int = 20,
+        guidance_scale: float = 7.5,
+        width: int = 512,
+        height: int = 512,
+    ) -> torch.Tensor:
+        """Run inference, return image tensor [3, H, W] in [0, 1] on CPU."""
         raise NotImplementedError
 
     def _is_checkpoint(self, path: Path) -> bool:
@@ -228,6 +243,59 @@ class SD15ModelAdapter(ModelAdapter):
             else:
                 decoded = decoded_output[0]
         return cast(torch.Tensor, decoded)
+
+    def generate(
+        self,
+        prompt: str,
+        negative_prompt: str = "",
+        seed: int = 0,
+        num_inference_steps: int = 20,
+        guidance_scale: float = 7.5,
+        width: int = 512,
+        height: int = 512,
+    ) -> torch.Tensor:
+        """Run DDIM inference via StableDiffusionPipeline, return [3,H,W] tensor in [0,1] on CPU."""
+        self._ensure_loaded()
+        assert self.vae is not None
+        assert self.unet is not None
+        assert self.text_encoder is not None
+        assert self.tokenizer is not None
+
+        scheduler = DDIMScheduler(
+            num_train_timesteps=1000,
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            clip_sample=False,
+            set_alpha_to_one=False,
+        )
+        pipe = StableDiffusionPipeline(
+            vae=self.vae,
+            unet=self.unet,
+            text_encoder=self.text_encoder,
+            tokenizer=self.tokenizer,
+            scheduler=cast(Any, scheduler),
+            safety_checker=None,  # type: ignore[arg-type]
+            feature_extractor=None,  # type: ignore[arg-type]
+            requires_safety_checker=False,
+        ).to(self.device)
+
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+        result = cast(
+            Any,
+            pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt or None,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                generator=generator,
+            ),
+        )
+        pil_image = result.images[0]
+        del pipe
+        return TF.to_tensor(pil_image)
 
     def _ensure_loaded(self) -> None:
         """Lazy-load SD1.5 models if not loaded yet."""
