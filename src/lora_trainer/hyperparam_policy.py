@@ -1,4 +1,5 @@
 """HyperparamPolicy - hyperparameter recommendation, constraints, validation, auto-adjustment"""
+
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -6,6 +7,7 @@ from typing import Any, Dict, List
 @dataclass
 class ValidationResult:
     """Validation result"""
+
     valid: bool
     errors: List[str]
     warnings: List[str]
@@ -14,6 +16,7 @@ class ValidationResult:
 @dataclass
 class VRAMEstimate:
     """VRAM estimation result"""
+
     total_gb: float
     breakdown: Dict[str, float]
     safe_threshold_gb: float
@@ -25,11 +28,7 @@ class HyperparamPolicy:
     def __init__(self, model_type: str = "sd15"):
         self.model_type = model_type
 
-    def recommend_defaults(
-        self,
-        dataset_size: int,
-        available_vram_gb: float
-    ) -> Dict[str, Any]:
+    def recommend_defaults(self, dataset_size: int, available_vram_gb: float) -> Dict[str, Any]:
         """Recommend default parameters"""
         # TODO: implement parameter recommendation
         raise NotImplementedError
@@ -44,11 +43,7 @@ class HyperparamPolicy:
         # TODO: implement VRAM estimation
         raise NotImplementedError
 
-    def auto_adjust(
-        self,
-        config: Dict[str, Any],
-        available_vram_gb: float
-    ) -> Dict[str, Any]:
+    def auto_adjust(self, config: Dict[str, Any], available_vram_gb: float) -> Dict[str, Any]:
         """Auto-adjust config to fit VRAM"""
         # TODO: implement auto-adjustment
         raise NotImplementedError

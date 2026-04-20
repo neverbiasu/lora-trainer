@@ -1,4 +1,5 @@
 """Presets - quick/balanced/quality three-tier preset definitions"""
+
 from typing import Any, Dict
 
 # Preset definitions

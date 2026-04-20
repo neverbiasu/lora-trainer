@@ -10,10 +10,10 @@ import torch.nn as nn
 
 from src.lora_trainer.lora import LoRAAdapter, LoRAModule
 
-
 # ---------------------------------------------------------------------------
 # LoRAModule
 # ---------------------------------------------------------------------------
+
 
 def test_lora_module_output_shape() -> None:
     """Forward pass should produce tensor of shape (batch, out_features)."""
@@ -38,6 +38,7 @@ def test_lora_module_up_weights_initialized_zeros() -> None:
 # ---------------------------------------------------------------------------
 # LoRAAdapter — injection
 # ---------------------------------------------------------------------------
+
 
 class _TinyUNet(nn.Module):
     """Minimal UNet-like model with attention projection layers."""
@@ -74,14 +75,20 @@ def test_apply_to_skips_on_duplicate() -> None:
     adapter = LoRAAdapter(rank=4, alpha=4.0)
 
     adapter.apply_to(
-        text_encoder=None, unet=unet,
-        apply_text_encoder=False, apply_unet=True,
-        target_modules=("to_q",), strict=False,
+        text_encoder=None,
+        unet=unet,
+        apply_text_encoder=False,
+        apply_unet=True,
+        target_modules=("to_q",),
+        strict=False,
     )
     report2 = adapter.apply_to(
-        text_encoder=None, unet=unet,
-        apply_text_encoder=False, apply_unet=True,
-        target_modules=("to_q",), strict=False,
+        text_encoder=None,
+        unet=unet,
+        apply_text_encoder=False,
+        apply_unet=True,
+        target_modules=("to_q",),
+        strict=False,
     )
 
     assert report2["total_skipped"] == 1
@@ -92,9 +99,12 @@ def test_get_trainable_params_non_empty_after_injection() -> None:
     unet = _TinyUNet()
     adapter = LoRAAdapter(rank=4, alpha=4.0)
     adapter.apply_to(
-        text_encoder=None, unet=unet,
-        apply_text_encoder=False, apply_unet=True,
-        target_modules=None, strict=False,
+        text_encoder=None,
+        unet=unet,
+        apply_text_encoder=False,
+        apply_unet=True,
+        target_modules=None,
+        strict=False,
     )
 
     params = adapter.get_trainable_params()
@@ -105,14 +115,18 @@ def test_get_trainable_params_non_empty_after_injection() -> None:
 # LoRAAdapter — export / load round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_export_load_roundtrip(tmp_path: Path) -> None:
     """export_weights() → load_weights() should restore identical state."""
     unet = _TinyUNet()
     adapter = LoRAAdapter(rank=4, alpha=4.0)
     adapter.apply_to(
-        text_encoder=None, unet=unet,
-        apply_text_encoder=False, apply_unet=True,
-        target_modules=None, strict=False,
+        text_encoder=None,
+        unet=unet,
+        apply_text_encoder=False,
+        apply_unet=True,
+        target_modules=None,
+        strict=False,
     )
 
     save_path = str(tmp_path / "lora.safetensors")
@@ -136,9 +150,12 @@ def test_export_writes_metadata(tmp_path: Path) -> None:
     unet = _TinyUNet()
     adapter = LoRAAdapter(rank=4, alpha=4.0)
     adapter.apply_to(
-        text_encoder=None, unet=unet,
-        apply_text_encoder=False, apply_unet=True,
-        target_modules=None, strict=False,
+        text_encoder=None,
+        unet=unet,
+        apply_text_encoder=False,
+        apply_unet=True,
+        target_modules=None,
+        strict=False,
     )
 
     save_path = str(tmp_path / "lora_meta.safetensors")
@@ -155,9 +172,12 @@ def test_load_weights_unsupported_extension_raises(tmp_path: Path) -> None:
     unet = _TinyUNet()
     adapter = LoRAAdapter(rank=4, alpha=4.0)
     adapter.apply_to(
-        text_encoder=None, unet=unet,
-        apply_text_encoder=False, apply_unet=True,
-        target_modules=None, strict=False,
+        text_encoder=None,
+        unet=unet,
+        apply_text_encoder=False,
+        apply_unet=True,
+        target_modules=None,
+        strict=False,
     )
 
     with pytest.raises(ValueError, match="Unsupported"):

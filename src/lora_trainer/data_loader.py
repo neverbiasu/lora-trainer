@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ValidationIssue:
     """Single validation issue."""
+
     level: str  # "error", "warning", "info"
     file: str
     message: str
@@ -30,6 +31,7 @@ class ValidationIssue:
 @dataclass
 class ValidationReport:
     """Complete validation report."""
+
     total_images: int
     total_captions: int
     valid_pairs: int
@@ -87,8 +89,10 @@ class DataValidator:
         if not self.dataset_path.exists():
             raise InvalidConfigError(
                 f"Dataset directory not found: {dataset_path}",
-                suggestions=["Check dataset_path in config",
-                            f"Create directory: mkdir -p {dataset_path}"],
+                suggestions=[
+                    "Check dataset_path in config",
+                    f"Create directory: mkdir -p {dataset_path}",
+                ],
             )
 
     def validate(self) -> ValidationReport:
@@ -126,9 +130,7 @@ class DataValidator:
             else:
                 if self._validate_image(image_dict[stem]):
                     caption_file = caption_dict[stem]
-                    caption_issue = self._validate_caption(
-                        caption_file, stem
-                    )
+                    caption_issue = self._validate_caption(caption_file, stem)
 
                     if caption_issue is None:
                         report.valid_pairs += 1
@@ -176,9 +178,7 @@ class DataValidator:
             logger.warning(f"Invalid image {image_path.name}: {e}")
             return False
 
-    def _validate_caption(
-        self, caption_path: Path, stem: str
-    ) -> Optional[ValidationIssue]:
+    def _validate_caption(self, caption_path: Path, stem: str) -> Optional[ValidationIssue]:
         """Validate caption content."""
         try:
             text = caption_path.read_text(encoding="utf-8").strip()
@@ -224,7 +224,13 @@ class AspectRatioBucketer:
     """Group images by aspect ratio for efficient batching."""
 
     STANDARD_RATIOS = [
-        0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0,
+        0.5,
+        0.67,
+        0.75,
+        1.0,
+        1.33,
+        1.5,
+        2.0,
     ]
 
     def __init__(self, target_area: int = 512 * 512):
@@ -268,41 +274,40 @@ class LoRADataset(Dataset):
         self.resolution = resolution
 
         self.image_paths = sorted(
-            list(self.dataset_path.glob("*.png")) +
-            list(self.dataset_path.glob("*.jpg")) +
-            list(self.dataset_path.glob("*.jpeg")) +
-            list(self.dataset_path.glob("*.webp"))
+            list(self.dataset_path.glob("*.png"))
+            + list(self.dataset_path.glob("*.jpg"))
+            + list(self.dataset_path.glob("*.jpeg"))
+            + list(self.dataset_path.glob("*.webp"))
         )
 
         if not self.image_paths:
             raise InvalidConfigError(
                 f"No images found in {dataset_path}",
-                suggestions=["Check dataset_path",
-                            "Ensure PNG/JPG files exist"],
+                suggestions=["Check dataset_path", "Ensure PNG/JPG files exist"],
             )
 
         self.captions = {}
         for img_path in self.image_paths:
             caption_path = img_path.with_suffix(".txt")
             if caption_path.exists():
-                self.captions[str(img_path)] = caption_path.read_text(
-                    encoding="utf-8"
-                ).strip()
+                self.captions[str(img_path)] = caption_path.read_text(encoding="utf-8").strip()
             else:
                 logger.warning(f"Missing caption for {img_path.name}")
                 self.captions[str(img_path)] = ""
 
-        self.transform = transforms.Compose([
-            transforms.Resize(
-                (resolution, resolution),
-                interpolation=transforms.InterpolationMode.LANCZOS,
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.5, 0.5, 0.5],
-                std=[0.5, 0.5, 0.5],
-            ),
-        ])
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    (resolution, resolution),
+                    interpolation=transforms.InterpolationMode.LANCZOS,
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.5, 0.5, 0.5],
+                    std=[0.5, 0.5, 0.5],
+                ),
+            ]
+        )
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -347,4 +352,3 @@ def create_data_loader(
     )
 
     return loader
-

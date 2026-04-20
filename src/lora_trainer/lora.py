@@ -1,4 +1,5 @@
 """LoRA implementation for Stable Diffusion fine-tuning."""
+
 import logging
 from typing import Any, Optional, cast
 
@@ -8,6 +9,7 @@ from safetensors.torch import load_file as load_safetensors
 from safetensors.torch import save_file as save_safetensors
 
 logger = logging.getLogger(__name__)
+
 
 class LoRAModule(nn.Module):
     """Single LoRA layer: ΔW = scale * up(down(x)), scale = alpha / rank."""
@@ -28,8 +30,14 @@ class LoRAModule(nn.Module):
         self.lora_down = nn.Linear(in_features, rank, bias=False)
         self.lora_up = nn.Linear(rank, out_features, bias=False)
 
-        self.device = cast(torch.device, org_module.weight.device) if org_module is not None else torch.device("cpu")
-        self.dtype = cast(torch.dtype, org_module.weight.dtype) if org_module is not None else torch.float32
+        self.device = (
+            cast(torch.device, org_module.weight.device)
+            if org_module is not None
+            else torch.device("cpu")
+        )
+        self.dtype = (
+            cast(torch.dtype, org_module.weight.dtype) if org_module is not None else torch.float32
+        )
         self.to(device=self.device, dtype=self.dtype)
         nn.init.kaiming_uniform_(self.lora_down.weight, a=0)
         nn.init.zeros_(self.lora_up.weight)
@@ -49,7 +57,9 @@ class LoRAAdapter(nn.Module):
         self.hook_handles: dict[str, Any] = {}
         self.default_target_modules = ("to_q", "to_k", "to_v", "to_out.0")
 
-    def _is_target_module(self, name: str, module: nn.Module, target_modules: tuple[str, ...]) -> bool:
+    def _is_target_module(
+        self, name: str, module: nn.Module, target_modules: tuple[str, ...]
+    ) -> bool:
         """Check whether a module should receive LoRA injection."""
         if not isinstance(module, nn.Linear):
             return False
@@ -91,7 +101,9 @@ class LoRAAdapter(nn.Module):
             linear_module.requires_grad_(False)
 
             def _make_forward_hook(lora: LoRAModule):
-                def _forward_hook(_module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor):
+                def _forward_hook(
+                    _module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor
+                ):
                     if len(inputs) == 0:
                         return output
                     return output + lora(inputs[0])

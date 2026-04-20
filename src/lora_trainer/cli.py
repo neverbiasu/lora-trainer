@@ -1,4 +1,5 @@
 """CLI entry point - flat argparse, no subcommands."""
+
 import argparse
 import logging
 import sys
@@ -35,30 +36,55 @@ def create_parser() -> argparse.ArgumentParser:
 
     training = parser.add_argument_group("Training")
     training.add_argument("--learning-rate", type=float, default=1e-4, help="Learning rate")
-    training.add_argument("--lr-scheduler", type=str, default="cosine", help="LR scheduler: cosine / constant")
+    training.add_argument(
+        "--lr-scheduler", type=str, default="cosine", help="LR scheduler: cosine / constant"
+    )
     training.add_argument("--batch-size", type=int, default=4, help="Batch size")
-    training.add_argument("--gradient-accumulation", type=int, default=1, help="Gradient accumulation steps")
+    training.add_argument(
+        "--gradient-accumulation", type=int, default=1, help="Gradient accumulation steps"
+    )
     training.add_argument("--max-steps", type=int, help="Max training steps (default: auto)")
-    training.add_argument("--preset", choices=["quick", "balanced", "quality"], help="Training preset")
+    training.add_argument(
+        "--preset", choices=["quick", "balanced", "quality"], help="Training preset"
+    )
     training.add_argument("--seed", type=int, default=42, help="Random seed")
 
     optim = parser.add_argument_group("Optimization")
-    optim.add_argument("--mixed-precision", choices=["fp16", "bf16", "fp32"], default="fp16", help="Mixed precision mode")
-    optim.add_argument("--enable-xformers", action="store_true", help="Enable xformers memory optimization")
-    optim.add_argument("--gradient-checkpointing", action="store_true", help="Enable gradient checkpointing")
+    optim.add_argument(
+        "--mixed-precision",
+        choices=["fp16", "bf16", "fp32"],
+        default="fp16",
+        help="Mixed precision mode",
+    )
+    optim.add_argument(
+        "--enable-xformers", action="store_true", help="Enable xformers memory optimization"
+    )
+    optim.add_argument(
+        "--gradient-checkpointing", action="store_true", help="Enable gradient checkpointing"
+    )
 
     output = parser.add_argument_group("Output")
-    output.add_argument("--output-dir", type=Path, default=Path("./output"), help="Output directory")
+    output.add_argument(
+        "--output-dir", type=Path, default=Path("./output"), help="Output directory"
+    )
     output.add_argument("--run-dir", type=Path, help="Base directory for run artifacts")
-    output.add_argument("--save-every-n-steps", type=int, default=500, help="Checkpoint save frequency")
-    output.add_argument("--sample-every-n-steps", type=int, default=250, help="Sample generation frequency")
+    output.add_argument(
+        "--save-every-n-steps", type=int, default=500, help="Checkpoint save frequency"
+    )
+    output.add_argument(
+        "--sample-every-n-steps", type=int, default=250, help="Sample generation frequency"
+    )
     output.add_argument("--sample-prompts", type=Path, help="Sample prompt file")
 
     mode = parser.add_argument_group("Mode")
     mode.add_argument("--config", type=Path, help="YAML configuration file")
     mode.add_argument("--resume", type=Path, help="Resume from run directory or checkpoint")
     mode.add_argument("--validate-only", action="store_true", help="Validate dataset and exit")
-    mode.add_argument("--export-only", action="store_true", help="Export model from run and exit (requires --resume)")
+    mode.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Export model from run and exit (requires --resume)",
+    )
     mode.add_argument("--dry-run", action="store_true", help="Preview resolved config and exit")
     mode.add_argument("--verbose", action="store_true", help="Verbose logging")
 
@@ -83,9 +109,7 @@ def _build_explicit_namespace(
 ) -> argparse.Namespace:
     """Return a namespace with only explicitly provided CLI values."""
     defaults: dict[str, object] = {
-        action.dest: action.default
-        for action in parser._actions
-        if action.dest != "help"
+        action.dest: action.default for action in parser._actions if action.dest != "help"
     }
     explicit: dict[str, object] = {}
 
@@ -177,6 +201,7 @@ def main():
         print(f"❌ training failed: {error}", file=sys.stderr)
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 

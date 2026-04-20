@@ -1,4 +1,5 @@
 """Config manager - handles YAML config loading, validation, merging"""
+
 import argparse
 import copy
 import logging

@@ -1,4 +1,5 @@
 """ModelAdapter - model loading and conditioning construction"""
+
 import logging
 from pathlib import Path
 from typing import Any, List, Mapping, Tuple, cast
@@ -23,15 +24,25 @@ from transformers import CLIPTextConfig, CLIPTextModel, CLIPTokenizer
 
 logger = logging.getLogger(__name__)
 
+
 def load_checkpoint_with_text_encoder_conversion(ckpt_path: str, device: torch.device) -> Tuple:
     """Load checkpoint and convert text encoder key format for compatibility.
 
     Handles models where text_model structure differs from standard format.
     """
     text_encoder_key_replacements = [
-        ("cond_stage_model.transformer.embeddings.", "cond_stage_model.transformer.text_model.embeddings."),
-        ("cond_stage_model.transformer.encoder.", "cond_stage_model.transformer.text_model.encoder."),
-        ("cond_stage_model.transformer.final_layer_norm.", "cond_stage_model.transformer.text_model.final_layer_norm."),
+        (
+            "cond_stage_model.transformer.embeddings.",
+            "cond_stage_model.transformer.text_model.embeddings.",
+        ),
+        (
+            "cond_stage_model.transformer.encoder.",
+            "cond_stage_model.transformer.text_model.encoder.",
+        ),
+        (
+            "cond_stage_model.transformer.final_layer_norm.",
+            "cond_stage_model.transformer.text_model.final_layer_norm.",
+        ),
     ]
 
     checkpoint = None
@@ -52,7 +63,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path: str, device: torch.d
     for rep_from, rep_to in text_encoder_key_replacements:
         for key in state_dict.keys():
             if key.startswith(rep_from):
-                new_key = rep_to + key[len(rep_from):]
+                new_key = rep_to + key[len(rep_from) :]
                 key_reps.append((key, new_key))
 
     for key, new_key in key_reps:
@@ -60,6 +71,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path: str, device: torch.d
         del state_dict[key]
 
     return checkpoint, state_dict
+
 
 class ModelAdapter:
     """Model adapter base class"""

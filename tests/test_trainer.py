@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
-from typing import Any
-
 import json
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
 import pytest
 import torch
 import torch.nn as nn
 
 from src.lora_trainer.trainer import Trainer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _base_config(output_dir: Path | None = None, **overrides: Any) -> dict:
     cfg: dict = {
@@ -61,6 +61,7 @@ class _FakeDataLoader:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def mock_model_adapter():
@@ -109,6 +110,7 @@ def mock_run_manager(tmp_path):
 # init
 # ---------------------------------------------------------------------------
 
+
 def test_trainer_init_sets_defaults() -> None:
     """Trainer __init__ should populate fields with correct types."""
     cfg = _base_config()
@@ -124,6 +126,7 @@ def test_trainer_init_sets_defaults() -> None:
 # start()
 # ---------------------------------------------------------------------------
 
+
 def test_start_raises_on_unsupported_base_model() -> None:
     """start() should raise ValueError for unknown base_model."""
     cfg = _base_config()
@@ -137,6 +140,7 @@ def test_start_raises_on_unsupported_base_model() -> None:
 # ---------------------------------------------------------------------------
 # end() — guard before start
 # ---------------------------------------------------------------------------
+
 
 def test_end_raises_before_start() -> None:
     """end() must raise RuntimeError if start() was never called."""
@@ -157,6 +161,7 @@ def test_validate_raises_before_start() -> None:
 # validate() — early return without config
 # ---------------------------------------------------------------------------
 
+
 def test_validate_skips_when_no_validation_config() -> None:
     """validate() should return immediately when 'validation' key is absent."""
     trainer = Trainer(_base_config())
@@ -171,6 +176,7 @@ def test_validate_skips_when_no_validation_config() -> None:
 # ---------------------------------------------------------------------------
 # save_checkpoint()
 # ---------------------------------------------------------------------------
+
 
 def test_save_checkpoint_writes_json_sidecar(
     tmp_path: Path,
@@ -202,14 +208,15 @@ def test_save_checkpoint_writes_json_sidecar(
 # full train() lifecycle with mocks
 # ---------------------------------------------------------------------------
 
+
 @patch("src.lora_trainer.trainer.create_data_loader")
 @patch("src.lora_trainer.trainer.LoRAAdapter")
 @patch("src.lora_trainer.trainer.SD15ModelAdapter")
 @patch("src.lora_trainer.trainer.RunManager")
 def test_train_lifecycle_calls_end(
-    MockRunManager,
-    MockSD15,
-    MockLoRA,
+    mock_run_manager_cls,
+    mock_sd15_cls,
+    mock_lora_cls,
     mock_create_dl,
     tmp_path: Path,
 ) -> None:
@@ -225,7 +232,7 @@ def test_train_lifecycle_calls_end(
     rm.start.return_value = run_dir
     rm.run_dir = run_dir
     rm.save_checkpoint.return_value = run_dir / "checkpoints" / "step_0.safetensors"
-    MockRunManager.return_value = rm
+    mock_run_manager_cls.return_value = rm
 
     # SD15 adapter mock
     sd = MagicMock()
@@ -236,14 +243,19 @@ def test_train_lifecycle_calls_end(
     sd.load_models.return_value = (MagicMock(spec=nn.Module), unet_mock, MagicMock(spec=nn.Module))
     sd.encode_image.return_value = torch.zeros(1, 4, 8, 8)
     sd.encode_prompt.return_value = torch.zeros(1, 77, 768)
-    MockSD15.return_value = sd
+    mock_sd15_cls.return_value = sd
 
     # LoRA adapter mock
     lora = MagicMock()
-    lora.apply_to.return_value = {"injected_count": 3, "skipped_count": 0, "injected_modules": [], "skipped_modules": []}
+    lora.apply_to.return_value = {
+        "injected_count": 3,
+        "skipped_count": 0,
+        "injected_modules": [],
+        "skipped_modules": [],
+    }
     lora.get_trainable_params.return_value = [torch.zeros(4, 4, requires_grad=True)]
     lora.state_dict.return_value = {}
-    MockLoRA.return_value = lora
+    mock_lora_cls.return_value = lora
 
     # DataLoader mock
     mock_create_dl.return_value = _FakeDataLoader(num_batches=3)

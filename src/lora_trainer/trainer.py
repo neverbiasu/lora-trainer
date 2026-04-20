@@ -1,4 +1,5 @@
 """Trainer - training orchestration layer"""
+
 import json
 import logging
 import re
@@ -54,7 +55,11 @@ class Trainer:
         self.model_adapter = SD15ModelAdapter(model_path)
         self.vae, self.unet, self.text_encoder = self.model_adapter.load_models()
 
-        logger.info("Initializing LoRA adapter (rank=%d, alpha=%.1f)", self.config["lora"]["rank"], self.config["lora"]["alpha"])
+        logger.info(
+            "Initializing LoRA adapter (rank=%d, alpha=%.1f)",
+            self.config["lora"]["rank"],
+            self.config["lora"]["alpha"],
+        )
         self.lora_adapter = LoRAAdapter(
             rank=self.config["lora"]["rank"],
             alpha=self.config["lora"]["alpha"],
@@ -72,7 +77,9 @@ class Trainer:
 
         torch.manual_seed(self.config["training"]["seed"])
 
-        dataset_path = self.config.get("data", {}).get("dataset_path") or self.config.get("training", {}).get("dataset")
+        dataset_path = self.config.get("data", {}).get("dataset_path") or self.config.get(
+            "training", {}
+        ).get("dataset")
         self.data_loader = create_data_loader(
             dataset_path=dataset_path,
             batch_size=self.config["training"]["batch_size"],
@@ -85,7 +92,9 @@ class Trainer:
             lr=self.config["training"]["learning_rate"],
         )
 
-        max_steps = self.config["training"].get("max_steps") or self.config["training"].get("max_train_steps")
+        max_steps = self.config["training"].get("max_steps") or self.config["training"].get(
+            "max_train_steps"
+        )
         if max_steps is None:
             num_epochs = self.config["training"].get("num_epochs", 10)
             max_steps = num_epochs * len(self.data_loader)
@@ -135,7 +144,9 @@ class Trainer:
         """Main training loop - manages start -> loop -> end lifecycle."""
         self.start(resume=resume)
 
-        max_steps = self.config["training"].get("max_steps") or self.config["training"].get("max_train_steps")
+        max_steps = self.config["training"].get("max_steps") or self.config["training"].get(
+            "max_train_steps"
+        )
         if max_steps is None:
             num_epochs = self.config["training"].get("num_epochs", 10)
             max_steps = num_epochs * len(self.data_loader)
@@ -172,7 +183,12 @@ class Trainer:
 
     def train_step(self, batch: tuple[Any, ...]) -> float:
         """Single training step."""
-        if self.optimizer is None or self.lora_adapter is None or self.unet is None or self.vae is None:
+        if (
+            self.optimizer is None
+            or self.lora_adapter is None
+            or self.unet is None
+            or self.vae is None
+        ):
             raise RuntimeError("call start() first")
         if self.model_adapter is None or self.noise_scheduler is None:
             raise RuntimeError("model_adapter or noise_scheduler not initialized")
