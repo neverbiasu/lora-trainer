@@ -194,8 +194,20 @@ class Trainer:
                     batch = next(data_loader_cycle)
 
                 loss = self.train_step(batch)
-                logger.debug("train_step loss=%f, isfinite=%s", loss, math.isfinite(loss))
-                if not math.isfinite(loss):
+                is_finite = math.isfinite(loss)
+                logger.debug(
+                    "train_step completed: step=%d loss=%.6f isfinite=%s",
+                    self.global_step,
+                    loss,
+                    is_finite,
+                )
+                if not is_finite:
+                    logger.error(
+                        "Non-finite loss at step %d. last_loss=%.6f, current_loss=%s",
+                        self.global_step,
+                        self.last_loss,
+                        loss,
+                    )
                     raise RuntimeError(
                         "Non-finite loss detected. "
                         "Try lower learning rate, verify captions/dataset quality, "
@@ -271,16 +283,43 @@ class Trainer:
         model_pred = cast(Any, self.unet(noisy_latents, timesteps, text_embeddings)).sample
 
         loss = torch.nn.functional.mse_loss(model_pred, noise)
+        loss_val = loss.item()
+        logger.debug(
+            "step=%d loss=%.6f, model_pred_range=[%.4f, %.4f], noise_range=[%.4f, %.4f]",
+            self.global_step,
+            loss_val,
+            model_pred.min().item(),
+            model_pred.max().item(),
+            noise.min().item(),
+            noise.max().item(),
+        )
 
         grad_accum = self.config["training"].get("gradient_accumulation", 1)
         (loss / grad_accum).backward()
 
         if (self.global_step + 1) % grad_accum == 0:
+            max_grad_norm = self.config["training"].get("max_grad_norm", 1.0)
+            torch.nn.utils.clip_grad_norm_(self.lora_adapter.get_trainable_params(), max_grad_norm)
+            grad_norm = (
+                sum(
+                    p.grad.norm().item() ** 2
+                    for p in self.lora_adapter.get_trainable_params()
+                    if p.grad is not None
+                )
+                ** 0.5
+            )
+            logger.debug(
+                "step=%d grad_norm=%.6f after clip(%.1f)",
+                self.global_step,
+                grad_norm,
+                max_grad_norm,
+            )
+
             self.optimizer.step()
             self.scheduler.step()
             self.optimizer.zero_grad()
 
-        return loss.item()
+        return loss_val
 
     def validate(self, step: int) -> None:
         """Generate a fixed-prompt sample and save to run/samples/."""
