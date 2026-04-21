@@ -157,27 +157,27 @@ class Trainer:
         run_manager = cast(RunManager, self.run_manager)
 
         try:
-            for _epoch in range(self.config["training"].get("num_epochs", 10)):
-                for batch in self.data_loader:
-                    if self.global_step >= max_steps:
-                        logger.info("Reached max_steps=%d, stopping training", max_steps)
-                        break
+            data_loader_cycle = iter(self.data_loader)
+            while self.global_step < max_steps:
+                try:
+                    batch = next(data_loader_cycle)
+                except StopIteration:
+                    data_loader_cycle = iter(self.data_loader)
+                    batch = next(data_loader_cycle)
 
-                    loss = self.train_step(batch)
-                    self.last_loss = loss
-                    run_manager.update_training_metrics(
-                        self.global_step, {"loss": loss, "lr": optimizer.param_groups[0]["lr"]}
-                    )
+                loss = self.train_step(batch)
+                self.last_loss = loss
+                run_manager.update_training_metrics(
+                    self.global_step, {"loss": loss, "lr": optimizer.param_groups[0]["lr"]}
+                )
 
-                    if validate_every > 0 and self.global_step % validate_every == 0:
-                        self.validate(self.global_step)
-                    if self.global_step % save_every == 0:
-                        self.save_checkpoint(self.global_step)
+                if validate_every > 0 and self.global_step % validate_every == 0:
+                    self.validate(self.global_step)
+                if self.global_step % save_every == 0:
+                    self.save_checkpoint(self.global_step)
 
-                    self.global_step += 1
-                else:
-                    continue
-                break
+                self.global_step += 1
+                logger.debug("step=%d/%d loss=%f", self.global_step, max_steps, loss)
         finally:
             self.end()
 
