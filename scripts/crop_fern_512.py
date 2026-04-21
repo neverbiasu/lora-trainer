@@ -22,7 +22,6 @@ def detect_face_region(img_array: np.ndarray) -> Optional[Tuple[int, int, int, i
     Returns (left, top, right, bottom) or None if not found.
     """
     try:
-
         h, w = img_array.shape[:2]
 
         if w < 512 or h < 512:

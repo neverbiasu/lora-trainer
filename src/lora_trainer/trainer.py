@@ -158,6 +158,17 @@ class Trainer:
         show_progress = self.config["training"].get("show_progress", True)
         optimizer = cast(torch.optim.Optimizer, self.optimizer)
         run_manager = cast(RunManager, self.run_manager)
+
+        logger.info("=== TRAIN START ===")
+        logger.info(
+            "max_steps=%d, save_every=%d, validate_every=%d, initial_global_step=%d",
+            max_steps,
+            save_every,
+            validate_every,
+            self.global_step,
+        )
+        logger.info("data_loader length=%d", len(self.data_loader))
+
         progress_bar = tqdm(
             total=max_steps,
             initial=self.global_step,
@@ -168,14 +179,22 @@ class Trainer:
 
         try:
             data_loader_cycle = iter(self.data_loader)
+            logger.info("Starting training loop: %d < %d", self.global_step, max_steps)
             while self.global_step < max_steps:
+                logger.debug("=== ITERATION START: step=%d ===", self.global_step)
                 try:
                     batch = next(data_loader_cycle)
+                    logger.debug(
+                        "Got batch: images shape=%s",
+                        batch[0].shape if isinstance(batch, tuple) else "unknown",
+                    )
                 except StopIteration:
+                    logger.debug("Data loader exhausted, restarting cycle")
                     data_loader_cycle = iter(self.data_loader)
                     batch = next(data_loader_cycle)
 
                 loss = self.train_step(batch)
+                logger.debug("train_step loss=%f, isfinite=%s", loss, math.isfinite(loss))
                 if not math.isfinite(loss):
                     raise RuntimeError(
                         "Non-finite loss detected. "
@@ -188,12 +207,14 @@ class Trainer:
                 )
 
                 if validate_every > 0 and self.global_step % validate_every == 0:
+                    logger.info("Running validation at step %d", self.global_step)
                     self.validate(self.global_step)
                 if self.global_step % save_every == 0:
+                    logger.info("Saving checkpoint at step %d", self.global_step)
                     self.save_checkpoint(self.global_step)
 
                 self.global_step += 1
-                logger.debug("step=%d/%d loss=%f", self.global_step, max_steps, loss)
+                logger.debug("step=%d/%d loss=%f (incremented)", self.global_step, max_steps, loss)
                 progress_bar.update(1)
                 progress_bar.set_postfix(
                     {
@@ -201,7 +222,20 @@ class Trainer:
                         "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
                     }
                 )
+            logger.info(
+                "Training loop complete: global_step=%d >= max_steps=%d",
+                self.global_step,
+                max_steps,
+            )
+        except Exception as e:
+            logger.error("Exception in training loop: %s", str(e), exc_info=True)
+            raise
         finally:
+            logger.info(
+                "=== TRAIN END: final_global_step=%d, final_loss=%f ===",
+                self.global_step,
+                self.last_loss,
+            )
             progress_bar.close()
             self.end()
 
