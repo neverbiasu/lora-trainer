@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -12,6 +13,7 @@ import torchvision.transforms.functional as TF
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ConstantLR, CosineAnnealingLR
+from tqdm import tqdm
 
 from src.lora_trainer.data_loader import create_data_loader
 from src.lora_trainer.lora import LoRAAdapter
@@ -153,8 +155,16 @@ class Trainer:
 
         save_every = self.config["training"].get("save_every_n_steps", 500)
         validate_every = self.config.get("validation", {}).get("every_n_steps", 0)
+        show_progress = self.config["training"].get("show_progress", True)
         optimizer = cast(torch.optim.Optimizer, self.optimizer)
         run_manager = cast(RunManager, self.run_manager)
+        progress_bar = tqdm(
+            total=max_steps,
+            initial=self.global_step,
+            desc="steps",
+            dynamic_ncols=True,
+            disable=not show_progress,
+        )
 
         try:
             data_loader_cycle = iter(self.data_loader)
@@ -166,6 +176,12 @@ class Trainer:
                     batch = next(data_loader_cycle)
 
                 loss = self.train_step(batch)
+                if not math.isfinite(loss):
+                    raise RuntimeError(
+                        "Non-finite loss detected. "
+                        "Try lower learning rate, verify captions/dataset quality, "
+                        "or reduce LoRA rank/alpha."
+                    )
                 self.last_loss = loss
                 run_manager.update_training_metrics(
                     self.global_step, {"loss": loss, "lr": optimizer.param_groups[0]["lr"]}
@@ -178,7 +194,15 @@ class Trainer:
 
                 self.global_step += 1
                 logger.debug("step=%d/%d loss=%f", self.global_step, max_steps, loss)
+                progress_bar.update(1)
+                progress_bar.set_postfix(
+                    {
+                        "loss": f"{loss:.4f}",
+                        "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
+                    }
+                )
         finally:
+            progress_bar.close()
             self.end()
 
     def train_step(self, batch: tuple[Any, ...]) -> float:
