@@ -356,7 +356,7 @@ class Trainer:
         with self._autocast_context():
             model_pred = cast(Any, self.unet(noisy_latents, timesteps, text_embeddings)).sample
 
-        loss = torch.nn.functional.mse_loss(model_pred, noise)
+        loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
         loss_val = loss.item()
         logger.debug(
             "step=%d loss=%.6f, model_pred_range=[%.4f, %.4f], noise_range=[%.4f, %.4f]",

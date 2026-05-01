@@ -11,11 +11,11 @@ lora:
   alpha: 8
 
 training:
-  learning_rate: 1e-4
+  learning_rate: 1e-5
   batch_size: 2
-  max_train_steps: 200
+  max_train_steps: 150
   preset: balanced
-  mixed_precision: fp16
+  mixed_precision: fp32
   seed: 42
 
 output:
