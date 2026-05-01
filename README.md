@@ -57,6 +57,43 @@ lora-trainer --config examples/config_fern_test.yaml \
 
 M1 currently includes config resolution/validation and run initialization. Training/export flows are scaffolded for the next milestone.
 
+## Colab Automation Agent
+
+To avoid manual notebook clicking for every run, use the built-in automation agent.
+
+Example (inside Colab runtime):
+
+```bash
+lora-colab-agent \
+  --config examples/config_agent_1000.yaml \
+  --run-dir /content/runs/test_fern \
+  --dataset-zip /content/fern_new.zip \
+  --extract-dir /content/dataset \
+  --trigger-token f3rn_char \
+  --assert-effective-training \
+  --archive-output /content/test_fern_run_artifacts.zip \
+  --report-path /content/lora_agent_report.json
+```
+
+What it automates:
+
+- Detect/extract dataset zip
+- Validate image+caption pairs
+- Optionally inject trigger token into all captions
+- Run dry-run and training
+- Enforce training effectiveness gate
+- Zip latest run artifacts and emit JSON report
+- Write terminal log summary to `lora_agent_report.log.txt`
+- Write image comparison sheet to `lora_agent_report.comparison.png` when a baseline dir is provided
+- Emit quantitative analysis fields in the JSON report
+
+Optional image comparison:
+
+```bash
+lora-colab-agent ... \
+  --reference-samples-dir /content/baseline_samples
+```
+
 ## Config Example
 
 ```yaml

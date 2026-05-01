@@ -44,6 +44,13 @@ DEFAULTS: dict[str, Any] = {
     "output": {
         "output_dir": "./output",
     },
+    "validation": {
+        "assert_effective_training": False,
+        "min_effective_steps": 100,
+        "min_lora_delta_l2": 1e-6,
+        "max_loss_ratio": 1.2,
+        "require_loss_drop": False,
+    },
 }
 
 # CLI arg name -> (yaml section, yaml key)
@@ -67,6 +74,7 @@ _CLI_TO_YAML: dict[str, tuple[str, str]] = {
     "output_dir": ("output", "output_dir"),
     "save_every_n_steps": ("training", "save_every_n_steps"),
     "sample_every_n_steps": ("training", "sample_every_n_steps"),
+    "assert_effective_training": ("validation", "assert_effective_training"),
 }
 
 # Inverted boolean flags (CLI flag means opposite of YAML value)
@@ -212,6 +220,21 @@ class ConfigManager:
         output_dir = _get_nested(config, "output", "output_dir")
         if output_dir is None or str(output_dir).strip() == "":
             errors.append("output.output_dir is required")
+
+        min_effective_steps = _get_nested(config, "validation", "min_effective_steps")
+        if min_effective_steps is not None:
+            if not isinstance(min_effective_steps, int) or min_effective_steps <= 0:
+                errors.append("validation.min_effective_steps must be a positive integer")
+
+        min_lora_delta_l2 = _get_nested(config, "validation", "min_lora_delta_l2")
+        if min_lora_delta_l2 is not None:
+            if not isinstance(min_lora_delta_l2, (int, float)) or min_lora_delta_l2 < 0:
+                errors.append("validation.min_lora_delta_l2 must be non-negative")
+
+        max_loss_ratio = _get_nested(config, "validation", "max_loss_ratio")
+        if max_loss_ratio is not None:
+            if not isinstance(max_loss_ratio, (int, float)) or max_loss_ratio <= 0:
+                errors.append("validation.max_loss_ratio must be positive")
 
         return errors
 

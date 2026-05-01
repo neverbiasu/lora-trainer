@@ -122,6 +122,20 @@ def test_trainer_init_sets_defaults() -> None:
     assert trainer.run_manager is None
 
 
+def test_configure_precision_enables_fp16_autocast_on_cuda() -> None:
+    """fp16 config should enable autocast settings when CUDA is requested."""
+    cfg = _base_config()
+    cfg["training"]["mixed_precision"] = "fp16"
+    trainer = Trainer(cfg)
+    trainer.device = torch.device("cuda")
+
+    trainer._configure_precision()
+
+    assert trainer.mixed_precision_mode == "fp16"
+    assert trainer.amp_autocast_enabled is True
+    assert trainer.amp_dtype == torch.float16
+
+
 # ---------------------------------------------------------------------------
 # start()
 # ---------------------------------------------------------------------------

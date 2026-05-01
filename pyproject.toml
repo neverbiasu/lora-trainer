@@ -46,6 +46,7 @@ xformers = [
 
 [project.scripts]
 lora-trainer = "lora_trainer.cli:main"
+lora-colab-agent = "lora_trainer.colab_agent:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/lora-trainer"

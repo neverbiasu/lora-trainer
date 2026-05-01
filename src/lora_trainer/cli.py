@@ -81,6 +81,11 @@ def create_parser() -> argparse.ArgumentParser:
     mode.add_argument("--resume", type=Path, help="Resume from run directory or checkpoint")
     mode.add_argument("--validate-only", action="store_true", help="Validate dataset and exit")
     mode.add_argument(
+        "--assert-effective-training",
+        action="store_true",
+        help="Fail if training quality gate checks do not pass",
+    )
+    mode.add_argument(
         "--export-only",
         action="store_true",
         help="Export model from run and exit (requires --resume)",

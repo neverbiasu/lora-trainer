@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,9 +17,11 @@ from torch.optim.lr_scheduler import ConstantLR, CosineAnnealingLR
 from tqdm import tqdm
 
 from src.lora_trainer.data_loader import create_data_loader
+from src.lora_trainer.errors import IneffectiveTrainingError
 from src.lora_trainer.lora import LoRAAdapter
 from src.lora_trainer.model_adapter import SD15ModelAdapter
 from src.lora_trainer.run_manager import RunManager
+from src.lora_trainer.training_validation import evaluate_training_effectiveness
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,12 @@ class Trainer:
         self.run_manager: RunManager | None = None
         self.global_step = 0
         self.last_loss = 0.0
+        self.first_loss: float | None = None
+        self.initial_lora_state: dict[str, torch.Tensor] | None = None
+        self.mixed_precision_mode = "fp32"
+        self.amp_autocast_enabled = False
+        self.amp_dtype: torch.dtype | None = None
+        self.grad_scaler: torch.amp.GradScaler | None = None
 
     def start(self, resume: str | None = None) -> Path:
         """Initialize training: load models, inject LoRA, setup optimizer."""
@@ -52,6 +61,16 @@ class Trainer:
 
         self.run_manager = RunManager()
         run_dir = self.run_manager.start(self.config)
+
+        self._configure_precision()
+        logger.info(
+            "Precision config: mixed_precision=%s autocast=%s amp_dtype=%s scaler=%s device=%s",
+            self.mixed_precision_mode,
+            self.amp_autocast_enabled,
+            self.amp_dtype,
+            self.grad_scaler.is_enabled() if self.grad_scaler is not None else False,
+            self.device,
+        )
 
         logger.info("Loading base model from %s", model_path)
         self.model_adapter = SD15ModelAdapter(model_path)
@@ -76,6 +95,11 @@ class Trainer:
             strict=False,
         )
         logger.info("LoRA injection report: %s", lora_report)
+        self.initial_lora_state = {
+            key: tensor.detach().float().cpu().clone()
+            for key, tensor in self.lora_adapter.state_dict().items()
+        }
+        logger.info("Trainable LoRA tensors=%d", len(self.initial_lora_state))
 
         torch.manual_seed(self.config["training"]["seed"])
 
@@ -86,6 +110,13 @@ class Trainer:
             dataset_path=dataset_path,
             batch_size=self.config["training"]["batch_size"],
             resolution=self.config.get("data", {}).get("resolution", 512),
+        )
+        logger.info(
+            "Dataset ready: path=%s batch_size=%d resolution=%d batches=%d",
+            dataset_path,
+            self.config["training"]["batch_size"],
+            self.config.get("data", {}).get("resolution", 512),
+            len(self.data_loader),
         )
 
         logger.info("Initializing optimizer and scheduler")
@@ -132,6 +163,43 @@ class Trainer:
         logger.info("Training ready: max_steps=%d device=%s", max_steps, self.device)
         return run_dir
 
+    def _configure_precision(self) -> None:
+        """Configure mixed precision and loss scaling for the current device."""
+        training_cfg = self.config.get("training", {})
+        self.mixed_precision_mode = str(training_cfg.get("mixed_precision", "fp32"))
+
+        if self.device.type != "cuda" or self.mixed_precision_mode == "fp32":
+            if self.mixed_precision_mode != "fp32":
+                logger.warning(
+                    "Mixed precision=%s requested but device=%s; falling back to fp32",
+                    self.mixed_precision_mode,
+                    self.device,
+                )
+            self.amp_autocast_enabled = False
+            self.amp_dtype = None
+            self.grad_scaler = None
+            return
+
+        if self.mixed_precision_mode == "fp16":
+            self.amp_autocast_enabled = True
+            self.amp_dtype = torch.float16
+            self.grad_scaler = torch.amp.GradScaler("cuda")
+            return
+
+        if self.mixed_precision_mode == "bf16":
+            self.amp_autocast_enabled = True
+            self.amp_dtype = torch.bfloat16
+            self.grad_scaler = None
+            return
+
+        raise ValueError(f"Unsupported mixed_precision: {self.mixed_precision_mode}")
+
+    def _autocast_context(self):
+        """Return an autocast context for the current precision mode."""
+        if not self.amp_autocast_enabled or self.amp_dtype is None:
+            return nullcontext()
+        return torch.autocast(device_type="cuda", dtype=self.amp_dtype)
+
     def _resolve_model_path(self) -> str:
         """Resolve model path from config."""
         if "model" in self.config and "model_path" in self.config["model"]:
@@ -168,6 +236,9 @@ class Trainer:
             self.global_step,
         )
         logger.info("data_loader length=%d", len(self.data_loader))
+        logger.info(
+            "Training metrics tracked: step/loss/lr, final loss_ratio, lora_delta_l2, lora_delta_mean_abs"
+        )
 
         progress_bar = tqdm(
             total=max_steps,
@@ -194,6 +265,8 @@ class Trainer:
                     batch = next(data_loader_cycle)
 
                 loss = self.train_step(batch)
+                if self.first_loss is None:
+                    self.first_loss = loss
                 is_finite = math.isfinite(loss)
                 logger.debug(
                     "train_step completed: step=%d loss=%.6f isfinite=%s",
@@ -266,7 +339,7 @@ class Trainer:
         images_tensor, captions = batch[0], batch[1]
         images = cast(torch.Tensor, images_tensor).to(self.device)
 
-        with torch.no_grad():
+        with torch.no_grad(), self._autocast_context():
             latents = self.model_adapter.encode_image(images)
 
         noise = torch.randn_like(latents)
@@ -277,10 +350,11 @@ class Trainer:
         )
         noisy_latents = noise_scheduler.add_noise(latents, noise, cast(Any, timesteps))
 
-        with torch.no_grad():
+        with torch.no_grad(), self._autocast_context():
             text_embeddings = self.model_adapter.encode_prompt(list(captions))
 
-        model_pred = cast(Any, self.unet(noisy_latents, timesteps, text_embeddings)).sample
+        with self._autocast_context():
+            model_pred = cast(Any, self.unet(noisy_latents, timesteps, text_embeddings)).sample
 
         loss = torch.nn.functional.mse_loss(model_pred, noise)
         loss_val = loss.item()
@@ -295,19 +369,20 @@ class Trainer:
         )
 
         grad_accum = self.config["training"].get("gradient_accumulation", 1)
-        (loss / grad_accum).backward()
+        scaled_loss = loss / grad_accum
+        scaler = self.grad_scaler
+        if scaler is not None and scaler.is_enabled():
+            scaler.scale(scaled_loss).backward()
+        else:
+            scaled_loss.backward()
 
         if (self.global_step + 1) % grad_accum == 0:
             max_grad_norm = self.config["training"].get("max_grad_norm", 1.0)
-            torch.nn.utils.clip_grad_norm_(self.lora_adapter.get_trainable_params(), max_grad_norm)
-            grad_norm = (
-                sum(
-                    p.grad.norm().item() ** 2
-                    for p in self.lora_adapter.get_trainable_params()
-                    if p.grad is not None
-                )
-                ** 0.5
-            )
+            params = self.lora_adapter.get_trainable_params()
+            if scaler is not None and scaler.is_enabled():
+                scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
+            grad_norm = sum(p.grad.norm().item() ** 2 for p in params if p.grad is not None) ** 0.5
             logger.debug(
                 "step=%d grad_norm=%.6f after clip(%.1f)",
                 self.global_step,
@@ -315,7 +390,11 @@ class Trainer:
                 max_grad_norm,
             )
 
-            self.optimizer.step()
+            if scaler is not None and scaler.is_enabled():
+                scaler.step(self.optimizer)
+                scaler.update()
+            else:
+                self.optimizer.step()
             self.scheduler.step()
             self.optimizer.zero_grad()
 
@@ -374,8 +453,73 @@ class Trainer:
         self.lora_adapter.export_weights(str(export_path), metadata=metadata)
         logger.info("Exported final LoRA weights to %s", export_path)
 
+        lora_delta_metrics = self._compute_lora_delta_metrics()
+        loss_ratio = None
+        if self.first_loss is not None and self.first_loss > 0:
+            loss_ratio = self.last_loss / self.first_loss
+
         metrics = {
             "total_steps": self.global_step,
             "final_loss": self.last_loss,
+            "first_loss": self.first_loss,
+            "loss_ratio": loss_ratio,
+            **lora_delta_metrics,
         }
+
+        report = evaluate_training_effectiveness(metrics, self.config)
+        metrics["effectiveness_passed"] = report.passed
+        metrics["effectiveness_reasons"] = report.reasons
+        logger.info(
+            "Training summary: steps=%d first_loss=%s final_loss=%s loss_ratio=%s lora_delta_l2=%s lora_delta_mean_abs=%s effectiveness=%s",
+            self.global_step,
+            self.first_loss,
+            self.last_loss,
+            loss_ratio,
+            lora_delta_metrics.get("lora_delta_l2"),
+            lora_delta_metrics.get("lora_delta_mean_abs"),
+            report.passed,
+        )
+        if report.reasons:
+            logger.warning("Training effectiveness reasons: %s", report.reasons)
         self.run_manager.end(metrics)
+
+        if self.config.get("validation", {}).get("assert_effective_training") and not report.passed:
+            raise IneffectiveTrainingError(
+                "Training did not pass effectiveness gate checks",
+                suggestions=report.reasons,
+            )
+
+    def _compute_lora_delta_metrics(self) -> dict[str, float | None]:
+        """Return aggregate LoRA parameter delta statistics."""
+        if self.lora_adapter is None or self.initial_lora_state is None:
+            return {
+                "lora_delta_l2": None,
+                "lora_delta_mean_abs": None,
+            }
+
+        total_sq = 0.0
+        total_abs = 0.0
+        total_count = 0
+
+        current_state = self.lora_adapter.state_dict()
+        for key, initial_tensor in self.initial_lora_state.items():
+            current_tensor = current_state.get(key)
+            if current_tensor is None:
+                continue
+            current_cpu = current_tensor.detach().float().cpu()
+            delta = current_cpu - initial_tensor
+
+            total_sq += float((delta * delta).sum().item())
+            total_abs += float(delta.abs().sum().item())
+            total_count += int(delta.numel())
+
+        if total_count == 0:
+            return {
+                "lora_delta_l2": None,
+                "lora_delta_mean_abs": None,
+            }
+
+        return {
+            "lora_delta_l2": math.sqrt(total_sq),
+            "lora_delta_mean_abs": total_abs / total_count,
+        }

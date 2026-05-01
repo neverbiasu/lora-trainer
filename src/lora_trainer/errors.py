@@ -85,6 +85,12 @@ class InfiniteLossError(LoRATrainerError):
     error_code = "E031"
 
 
+class IneffectiveTrainingError(LoRATrainerError):
+    """Training did not pass effectiveness gate checks"""
+
+    error_code = "E032"
+
+
 # Config-related errors
 class InvalidConfigError(LoRATrainerError):
     """Invalid config format"""
