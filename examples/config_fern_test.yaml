@@ -7,15 +7,15 @@ data:
   cache_latents: false
 
 lora:
-  rank: 32
-  alpha: 32
+  rank: 8
+  alpha: 8
 
 training:
   learning_rate: 1e-4
   batch_size: 2
-  max_train_steps: 1000
+  max_train_steps: 200
   preset: balanced
-  mixed_precision: fp32
+  mixed_precision: fp16
   seed: 42
 
 output:
