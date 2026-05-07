@@ -128,7 +128,7 @@ class SD15ModelAdapter(ModelAdapter):
         self.text_encoder: CLIPTextModel | None = None
         self.tokenizer: CLIPTokenizer | None = None
 
-    def load_models(self) -> Tuple[nn.Module, ...]:
+    def load_models(self, target_dtype: torch.dtype | None = None) -> Tuple[nn.Module, ...]:
         """Load SD1.5 model components (VAE, UNet, text encoder)."""
         if self._is_checkpoint(Path(self.model_name_or_path)):
             _, state_dict = load_checkpoint_with_text_encoder_conversion(
@@ -149,6 +149,9 @@ class SD15ModelAdapter(ModelAdapter):
             nn.Module.to(self.vae, self.device)
             vae_info = self.vae.load_state_dict(converted_vae_state_dict)
             logger.info("Loaded VAE with info: %s", vae_info)
+            
+            # Force VAE to float32 to avoid NaN during fp16 encoding
+            self.vae.to(torch.float32)
 
             clip_config = CLIPTextConfig(
                 vocab_size=49408,
@@ -182,7 +185,11 @@ class SD15ModelAdapter(ModelAdapter):
 
             self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
         else:
-            torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+            if target_dtype is not None:
+                torch_dtype = target_dtype
+            else:
+                torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+            
             pipe = StableDiffusionPipeline.from_pretrained(
                 self.model_name_or_path,
                 torch_dtype=torch_dtype,
@@ -190,6 +197,8 @@ class SD15ModelAdapter(ModelAdapter):
             pipe.to(self.device)
 
             self.vae = pipe.vae
+            # Force VAE to float32 to avoid NaN during fp16 encoding
+            self.vae.to(torch.float32)
             self.unet = pipe.unet
             self.text_encoder = pipe.text_encoder
             self.tokenizer = cast(CLIPTokenizer, pipe.tokenizer)

@@ -74,7 +74,11 @@ class Trainer:
 
         logger.info("Loading base model from %s", model_path)
         self.model_adapter = SD15ModelAdapter(model_path)
-        self.vae, self.unet, self.text_encoder = self.model_adapter.load_models()
+        
+        # Decide the dtype to load the base model in
+        load_dtype = torch.float32 if self.mixed_precision_mode == "fp32" else torch.float16
+        
+        self.vae, self.unet, self.text_encoder = self.model_adapter.load_models(target_dtype=load_dtype)
 
         logger.info(
             "Initializing LoRA adapter (rank=%d, alpha=%.1f)",
