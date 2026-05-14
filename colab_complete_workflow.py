@@ -15,13 +15,12 @@ Colab 训练完整工作流脚本
 在 Colab 笔记本中创建新单元格，粘贴以下代码并运行。
 """
 
-import subprocess
-import os
 import json
+import os
+import subprocess
 import sys
-from pathlib import Path
-from typing import Dict, Any
 import time
+from pathlib import Path
 
 # ============================================================================
 # 配置
@@ -39,6 +38,7 @@ RUN_DIR = "/content/runs/test_fern"
 # 工具函数
 # ============================================================================
 
+
 def log_section(title: str):
     """打印格式化的分组标题"""
     print(f"\n{'=' * 70}")
@@ -51,20 +51,16 @@ def run_command(cmd: str, description: str = "") -> tuple[int, str, str]:
     if description:
         print(f"\n▶ {description}")
         print(f"  Command: {cmd[:100]}{'...' if len(cmd) > 100 else ''}")
-    
+
     result = subprocess.run(
-        cmd,
-        shell=True,
-        capture_output=True,
-        text=True,
-        cwd=WORKDIR if "python -m" in cmd else None
+        cmd, shell=True, capture_output=True, text=True, cwd=WORKDIR if "python -m" in cmd else None
     )
-    
+
     if result.stdout:
         print(result.stdout)
     if result.returncode != 0 and result.stderr:
         print(f"❌ Error: {result.stderr}")
-    
+
     return result.returncode, result.stdout, result.stderr
 
 
@@ -88,10 +84,9 @@ if check_file_exists(TARGET_ZIP, "检查 ZIP 是否已存在"):
 else:
     print(f"📥 从 {DOWNLOAD_URL} 下载数据...")
     returncode, stdout, stderr = run_command(
-        f"wget {DOWNLOAD_URL} -O {TARGET_ZIP} --quiet --show-progress",
-        "下载数据集"
+        f"wget {DOWNLOAD_URL} -O {TARGET_ZIP} --quiet --show-progress", "下载数据集"
     )
-    
+
     if returncode == 0 and check_file_exists(TARGET_ZIP):
         print("✓ 下载完成")
     else:
@@ -142,7 +137,7 @@ if missing_captions:
         print(f"  - {p}")
     sys.exit(1)
 else:
-    print(f"✓ 所有图像都有对应的标题文件")
+    print("✓ 所有图像都有对应的标题文件")
 
 
 # ============================================================================
@@ -160,14 +155,11 @@ updated = 0
 for txt_path in caption_files:
     text = txt_path.read_text(encoding="utf-8").strip()
     if not text.startswith(TRIGGER_TOKEN):
-        txt_path.write_text(
-            f"{TRIGGER_TOKEN}, {text}" if text else TRIGGER_TOKEN,
-            encoding="utf-8"
-        )
+        txt_path.write_text(f"{TRIGGER_TOKEN}, {text}" if text else TRIGGER_TOKEN, encoding="utf-8")
         updated += 1
 
 print(f"✓ 更新了 {updated} 个文件")
-print(f"📝 使用提示词示例:")
+print("📝 使用提示词示例:")
 print(f"   - '{TRIGGER_TOKEN}, 1girl'")
 print(f"   - 'portrait of {TRIGGER_TOKEN}, 1girl'")
 
@@ -181,7 +173,7 @@ log_section("Step 5: 干运行（配置验证）")
 returncode, _, _ = run_command(
     f"cd {WORKDIR} && PYTHONPATH={WORKDIR} python -m src.lora_trainer.cli "
     f"--config {CONFIG_PATH} --dataset {extracted_path} --run-dir {RUN_DIR} --dry-run",
-    "执行干运行检查"
+    "执行干运行检查",
 )
 
 if returncode != 0:
@@ -197,7 +189,7 @@ print("✓ 干运行检查通过")
 
 log_section("Step 6: 启动训练")
 
-print(f"⏱  开始训练... (预计 10-30 分钟，取决于 GPU)")
+print("⏱  开始训练... (预计 10-30 分钟，取决于 GPU)")
 print(f"   配置: {CONFIG_PATH}")
 print(f"   数据集: {extracted_path}")
 print(f"   输出: {RUN_DIR}")
@@ -207,7 +199,7 @@ start_time = time.time()
 returncode, _, _ = run_command(
     f"cd {WORKDIR} && PYTHONPATH={WORKDIR} python -m src.lora_trainer.cli "
     f"--config {CONFIG_PATH} --dataset {extracted_path} --run-dir {RUN_DIR}",
-    "执行训练"
+    "执行训练",
 )
 
 elapsed = time.time() - start_time
@@ -240,17 +232,25 @@ metadata_path = latest_run / "metadata.json"
 if metadata_path.exists():
     with open(metadata_path) as f:
         metadata = json.load(f)
-    
-    print(f"\n📊 训练指标:")
+
+    print("\n📊 训练指标:")
     print(f"  总步数: {metadata.get('total_steps', 'N/A')}")
-    print(f"  初始 loss: {metadata.get('first_loss', 'N/A'):.4f}" if 'first_loss' in metadata else "  初始 loss: N/A")
-    print(f"  最终 loss: {metadata.get('final_loss', 'N/A'):.4f}" if 'final_loss' in metadata else "  最终 loss: N/A")
-    
-    if 'effectiveness' in metadata:
-        eff = metadata['effectiveness']
+    print(
+        f"  初始 loss: {metadata.get('first_loss', 'N/A'):.4f}"
+        if "first_loss" in metadata
+        else "  初始 loss: N/A"
+    )
+    print(
+        f"  最终 loss: {metadata.get('final_loss', 'N/A'):.4f}"
+        if "final_loss" in metadata
+        else "  最终 loss: N/A"
+    )
+
+    if "effectiveness" in metadata:
+        eff = metadata["effectiveness"]
         print(f"  有效性检查: {'✓ 通过' if eff.get('passed') else '✗ 未通过'}")
-        if eff.get('reasons'):
-            for reason in eff['reasons']:
+        if eff.get("reasons"):
+            for reason in eff["reasons"]:
                 print(f"    - {reason}")
 else:
     print("⚠  metadata.json 未找到")
@@ -263,7 +263,7 @@ if check_file_exists(str(lora_path), "LoRA 文件"):
 # 检查日志
 log_path = latest_run / "logs" / "train.log"
 if log_path.exists():
-    print(f"\n📋 训练日志 (最后 20 行):")
+    print("\n📋 训练日志 (最后 20 行):")
     with open(log_path) as f:
         lines = f.readlines()
         for line in lines[-20:]:
@@ -281,9 +281,9 @@ archive_path = f"/content/{latest_run.name}_artifacts.zip"
 run_command(f"cd /content && zip -r {archive_path} {latest_run.name} >/dev/null 2>&1", "创建压缩包")
 
 if check_file_exists(archive_path, "压缩包"):
-    print(f"\n✓ 压缩包已创建:")
+    print("\n✓ 压缩包已创建:")
     print(f"   路径: {archive_path}")
-    print(f"\n📥 在 Colab Files 面板中可以下载此文件")
+    print("\n📥 在 Colab Files 面板中可以下载此文件")
     print(f"   或使用: from google.colab import files; files.download('{archive_path}')")
 
 
