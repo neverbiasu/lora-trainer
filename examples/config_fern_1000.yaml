@@ -11,8 +11,11 @@ lora:
   alpha: 8
 
 training:
-  # Increased LR for faster adaptation; change to 5e-5 if unstable
-  learning_rate: 2e-5
+  # Increased LR for faster adaptation (Standard SD1.5 LoRA Unet LR is 1e-4)
+  learning_rate: 1e-4
+  text_encoder_lr: 5e-5
+  lr_scheduler: constant_with_warmup
+  lr_warmup_steps: 100
   batch_size: 1
   # Run longer as requested
   max_train_steps: 1000

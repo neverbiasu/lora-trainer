@@ -113,6 +113,7 @@ class RunManager:
             format="[%(asctime)s] [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
             handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
+            force=True,
         )
 
     def _generate_run_id(self, config: dict[str, Any]) -> str:

@@ -54,6 +54,7 @@ class Trainer:
         self.global_step = 0
         self.last_loss = 0.0
         self.first_loss: float | None = None
+        self.loss_history: list[tuple[int, float]] = []
         self.initial_lora_state: dict[str, torch.Tensor] | None = None
         self.mixed_precision_mode = "fp32"
         self.amp_autocast_enabled = False
@@ -345,6 +346,7 @@ class Trainer:
                         "or reduce LoRA rank/alpha."
                     )
                 self.last_loss = loss
+                self.loss_history.append((self.global_step, loss))
                 run_manager.update_training_metrics(
                     self.global_step, {"loss": loss, "lr": optimizer.param_groups[0]["lr"]}
                 )
@@ -552,6 +554,60 @@ class Trainer:
         )
         if report.reasons:
             logger.warning("Training effectiveness reasons: %s", report.reasons)
+
+        if self.loss_history:
+            try:
+                import csv
+
+                loss_csv_path = cast(Path, run_dir) / "logs" / "loss_history.csv"
+                with open(loss_csv_path, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["step", "loss"])
+                    writer.writerows(self.loss_history)
+                logger.info("Saved loss history CSV to %s", loss_csv_path)
+            except Exception as e:
+                logger.warning("Failed to save loss history CSV: %s", e)
+
+            try:
+                import matplotlib.pyplot as plt
+
+                steps, losses = zip(*self.loss_history)
+                plt.figure(figsize=(10, 6))
+                plt.plot(
+                    steps, losses, label="Training Loss", color="blue", linewidth=1.5, alpha=0.8
+                )
+
+                # Apply moving average smoothing for better visibility
+                if len(losses) > 10:
+                    window = min(10, len(losses) // 5)
+                    smoothed = [
+                        sum(losses[i : i + window]) / window
+                        for i in range(len(losses) - window + 1)
+                    ]
+                    smooth_steps = steps[window - 1 :]
+                    plt.plot(
+                        smooth_steps,
+                        smoothed,
+                        label=f"Smoothed Loss (window={window})",
+                        color="red",
+                        linewidth=2,
+                    )
+
+                plt.xlabel("Global Step")
+                plt.ylabel("Loss")
+                plt.title("Training Loss Curve")
+                plt.grid(True, linestyle="--", alpha=0.6)
+                plt.legend()
+
+                loss_chart_path = cast(Path, run_dir) / "logs" / "loss_curve.png"
+                plt.savefig(loss_chart_path, dpi=300, bbox_inches="tight")
+                plt.close()
+                logger.info("Saved loss curve chart to %s", loss_chart_path)
+            except ImportError:
+                logger.warning("matplotlib is not installed. Loss chart will not be generated.")
+            except Exception as e:
+                logger.warning("Failed to generate loss curve chart: %s", e)
+
         self.run_manager.end(metrics)
 
         if self.config.get("validation", {}).get("assert_effective_training") and not report.passed:
