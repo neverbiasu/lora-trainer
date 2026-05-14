@@ -210,8 +210,16 @@ class ConfigManager:
                 errors.append("training.learning_rate must be positive")
 
         scheduler = _get_nested(config, "training", "lr_scheduler")
-        if scheduler not in {"cosine", "constant"}:
-            errors.append("training.lr_scheduler must be one of: cosine, constant")
+        valid_schedulers = {
+            "cosine",
+            "constant",
+            "linear",
+            "cosine_with_restarts",
+            "polynomial",
+            "constant_with_warmup",
+        }
+        if scheduler not in valid_schedulers:
+            errors.append(f"training.lr_scheduler must be one of: {', '.join(valid_schedulers)}")
 
         mixed_precision = _get_nested(config, "training", "mixed_precision")
         if mixed_precision not in {"fp16", "bf16", "fp32"}:
