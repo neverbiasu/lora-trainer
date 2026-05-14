@@ -27,10 +27,14 @@ DEFAULTS: dict[str, Any] = {
     "lora": {
         "rank": 32,
         "alpha": 32,
+        "apply_text_encoder": True,
     },
     "training": {
         "learning_rate": 1e-4,
-        "lr_scheduler": "cosine",
+        "text_encoder_lr": 1e-5,
+        "lr_scheduler": "constant_with_warmup",
+        "lr_warmup_steps": 0,
+        "min_snr_gamma": 5.0,
         "batch_size": 4,
         "gradient_accumulation": 1,
         "max_train_steps": None,

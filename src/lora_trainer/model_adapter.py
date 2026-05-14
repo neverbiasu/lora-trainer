@@ -78,7 +78,12 @@ class ModelAdapter:
 
     def __init__(self, model_name_or_path: str):
         self.model_name_or_path = model_name_or_path
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
 
     def load_models(self) -> Tuple[nn.Module, ...]:
         """Load model components (VAE, UNet, TE)."""
@@ -149,7 +154,7 @@ class SD15ModelAdapter(ModelAdapter):
             nn.Module.to(self.vae, self.device)
             vae_info = self.vae.load_state_dict(converted_vae_state_dict)
             logger.info("Loaded VAE with info: %s", vae_info)
-            
+
             # Force VAE to float32 to avoid NaN during fp16 encoding
             self.vae.to(torch.float32)
 
@@ -189,7 +194,7 @@ class SD15ModelAdapter(ModelAdapter):
                 torch_dtype = target_dtype
             else:
                 torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
-            
+
             pipe = StableDiffusionPipeline.from_pretrained(
                 self.model_name_or_path,
                 torch_dtype=torch_dtype,

@@ -55,7 +55,17 @@ class LoRAAdapter(nn.Module):
         self.alpha = alpha
         self.lora_modules = nn.ModuleDict()
         self.hook_handles: dict[str, Any] = {}
-        self.default_target_modules = ("to_q", "to_k", "to_v", "to_out.0")
+        # Extended target modules to cover UNet MLPs and similar dense layers for higher expressive capacity
+        self.default_target_modules = (
+            "to_q",
+            "to_k",
+            "to_v",
+            "to_out.0",
+            "ff.net.0.proj",
+            "ff.net.2",
+            "proj_in",
+            "proj_out",
+        )
 
     def _is_target_module(
         self, name: str, module: nn.Module, target_modules: tuple[str, ...]

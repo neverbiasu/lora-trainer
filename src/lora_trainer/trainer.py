@@ -11,6 +11,7 @@ from typing import Any, cast
 import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TF
+from diffusers.optimization import get_scheduler
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ConstantLR, CosineAnnealingLR
@@ -31,7 +32,12 @@ class Trainer:
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
 
         self.model_adapter: SD15ModelAdapter | None = None
         self.lora_adapter: LoRAAdapter | None = None
@@ -74,11 +80,22 @@ class Trainer:
 
         logger.info("Loading base model from %s", model_path)
         self.model_adapter = SD15ModelAdapter(model_path)
-        
+
         # Decide the dtype to load the base model in
         load_dtype = torch.float32 if self.mixed_precision_mode == "fp32" else torch.float16
-        
-        self.vae, self.unet, self.text_encoder = self.model_adapter.load_models(target_dtype=load_dtype)
+
+        self.vae, self.unet, self.text_encoder = self.model_adapter.load_models(
+            target_dtype=load_dtype
+        )
+
+        # Freeze base models and set to eval mode
+        self.unet.requires_grad_(False)
+        self.unet.eval()
+        self.text_encoder.requires_grad_(False)
+        self.text_encoder.eval()
+        if self.vae is not None:
+            self.vae.requires_grad_(False)
+            self.vae.eval()
 
         logger.info(
             "Initializing LoRA adapter (rank=%d, alpha=%.1f)",
@@ -124,10 +141,31 @@ class Trainer:
         )
 
         logger.info("Initializing optimizer and scheduler")
-        self.optimizer = AdamW(
-            self.lora_adapter.get_trainable_params(),
-            lr=self.config["training"]["learning_rate"],
-        )
+
+        # Split parameters into UNet and Text Encoder groups for separate learning rates
+        unet_params = []
+        te_params = []
+        for name, param in self.lora_adapter.named_parameters():
+            if not param.requires_grad:
+                continue
+            # Text encoder parameters usually end up under 'lora_modules.text_encoder...'
+            # This depends on how apply_to registers them. `apply_to` iterates over named_modules.
+            # In diffusers SD1.5, UNet layers often start with 'down_blocks', 'up_blocks', 'mid_block'.
+            # TextEncoder layers start with 'text_model'.
+            if "text_model" in name or "text_encoder" in name:
+                te_params.append(param)
+            else:
+                unet_params.append(param)
+
+        unet_lr = self.config["training"]["learning_rate"]
+        te_lr = self.config["training"].get("text_encoder_lr", unet_lr * 0.1)
+
+        param_groups = [{"params": unet_params, "lr": unet_lr}]
+        if te_params:
+            param_groups.append({"params": te_params, "lr": te_lr})
+            logger.info("Configured separate learning rate for Text Encoder: %.2e", te_lr)
+
+        self.optimizer = AdamW(param_groups)
 
         max_steps = self.config["training"].get("max_steps") or self.config["training"].get(
             "max_train_steps"
@@ -136,10 +174,23 @@ class Trainer:
             num_epochs = self.config["training"].get("num_epochs", 10)
             max_steps = num_epochs * len(self.data_loader)
 
-        if self.config["training"].get("lr_scheduler") == "cosine":
-            self.scheduler = CosineAnnealingLR(self.optimizer, T_max=max_steps)
-        else:
-            self.scheduler = ConstantLR(self.optimizer)
+        lr_scheduler_name = self.config["training"].get("lr_scheduler", "constant")
+        lr_warmup_steps = self.config["training"].get("lr_warmup_steps", 0)
+
+        # Fallback to defaults or native PyTorch if generic scheduler not found via diffusers
+        try:
+            self.scheduler = get_scheduler(
+                lr_scheduler_name,
+                optimizer=self.optimizer,
+                num_warmup_steps=lr_warmup_steps,
+                num_training_steps=max_steps,
+            )
+        except Exception:
+            # Fallback to existing manual assignment
+            if lr_scheduler_name == "cosine":
+                self.scheduler = CosineAnnealingLR(self.optimizer, T_max=max_steps)
+            else:
+                self.scheduler = ConstantLR(self.optimizer)
 
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
@@ -172,7 +223,8 @@ class Trainer:
         training_cfg = self.config.get("training", {})
         self.mixed_precision_mode = str(training_cfg.get("mixed_precision", "fp32"))
 
-        if self.device.type != "cuda" or self.mixed_precision_mode == "fp32":
+        # MPS has limited support for fp16 autocast with SD1.5, often it's better to stay fp32, but we preserve original intent.
+        if self.device.type not in ["cuda", "mps"] or self.mixed_precision_mode == "fp32":
             if self.mixed_precision_mode != "fp32":
                 logger.warning(
                     "Mixed precision=%s requested but device=%s; falling back to fp32",
@@ -202,7 +254,9 @@ class Trainer:
         """Return an autocast context for the current precision mode."""
         if not self.amp_autocast_enabled or self.amp_dtype is None:
             return nullcontext()
-        return torch.autocast(device_type="cuda", dtype=self.amp_dtype)
+        # Fallback to cpu autocast if device is not cuda/mps, else use device.type
+        # Note MPS doesnt support all autocast dtypes currently but diffusers handles it loosely
+        return torch.autocast(device_type=self.device.type, dtype=self.amp_dtype)
 
     def _resolve_model_path(self) -> str:
         """Resolve model path from config."""
@@ -360,7 +414,20 @@ class Trainer:
         with self._autocast_context():
             model_pred = cast(Any, self.unet(noisy_latents, timesteps, text_embeddings)).sample
 
-        loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
+        loss_tensor = torch.nn.functional.mse_loss(
+            model_pred.float(), noise.float(), reduction="none"
+        )
+        loss_tensor = loss_tensor.mean(dim=[1, 2, 3])
+
+        min_snr_gamma = self.config["training"].get("min_snr_gamma")
+        if min_snr_gamma is not None:
+            # Apply Min-SNR Weighting to balance learning across timesteps
+            alphas_cumprod = noise_scheduler.alphas_cumprod.to(self.device)
+            snr = alphas_cumprod[timesteps] / (1 - alphas_cumprod[timesteps])
+            min_snr_weight = torch.clamp(snr, max=min_snr_gamma) / snr
+            loss_tensor = loss_tensor * min_snr_weight
+
+        loss = loss_tensor.mean()
         loss_val = loss.item()
         logger.debug(
             "step=%d loss=%.6f, model_pred_range=[%.4f, %.4f], noise_range=[%.4f, %.4f]",
