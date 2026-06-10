@@ -138,3 +138,116 @@ class TrainingEvaluator:
         sheet.save(output_path)
         logger.info("Saved comparison sheet: %s (%d pairs)", output_path, len(names))
         return output_path
+
+    # -- CLIP similarity -----------------------------------------------------
+
+    def _load_clip(self) -> None:
+        """Lazy-load CLIP model and processor."""
+        if self._clip_model is not None:
+            return
+
+        import torch
+        from transformers import CLIPModel, CLIPProcessor
+
+        model_name = "openai/clip-vit-base-patch32"
+        logger.info("Loading CLIP model: %s", model_name)
+        self._clip_processor = CLIPProcessor.from_pretrained(model_name)
+        self._clip_model = CLIPModel.from_pretrained(model_name).to(self.device).eval()
+
+    def _get_clip_image_embedding(self, image_path: Path) -> "torch.Tensor":
+        """Return L2-normalized CLIP image embedding for a single image."""
+        import torch
+
+        self._load_clip()
+        image = Image.open(image_path).convert("RGB")
+        inputs = self._clip_processor(images=image, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            features = self._clip_model.get_image_features(**inputs)
+        features = features / features.norm(dim=-1, keepdim=True)
+        return features[0]  # shape: (512,)
+
+    def _compute_dataset_centroid(self, dataset_path: str) -> "torch.Tensor":
+        """Compute mean CLIP embedding over all images in the dataset directory."""
+        import torch
+
+        dataset_dir = Path(dataset_path)
+        image_paths = sorted(
+            p for p in dataset_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+        )
+        if not image_paths:
+            raise FileNotFoundError(f"No images found in dataset: {dataset_path}")
+
+        embeddings = []
+        for img_path in image_paths:
+            emb = self._get_clip_image_embedding(img_path)
+            embeddings.append(emb)
+
+        centroid = torch.stack(embeddings).mean(dim=0)
+        centroid = centroid / centroid.norm()
+        return centroid
+
+    def compute_clip_similarity(
+        self, generated_dir: Path, reference_dir: Path
+    ) -> float:
+        """Compute mean CLIP cosine similarity between generated images and reference centroid.
+
+        Returns average cosine similarity as a float in [-1, 1].
+        """
+        import torch
+
+        centroid = self._compute_dataset_centroid(str(reference_dir))
+        gen_images = _list_images(generated_dir)
+
+        if not gen_images:
+            return 0.0
+
+        similarities: list[float] = []
+        for name, path in gen_images.items():
+            emb = self._get_clip_image_embedding(path)
+            sim = float(torch.dot(emb, centroid).item())
+            similarities.append(sim)
+
+        return float(np.mean(similarities))
+
+    # -- Full evaluation pipeline -------------------------------------------
+
+    def evaluate(
+        self,
+        baseline_dir: Path,
+        final_dir: Path,
+        dataset_path: str,
+        output_dir: Path,
+    ) -> EvaluationReport:
+        """Run full evaluation: pixel diff + CLIPScore + comparison sheet."""
+        mean_mae, mean_mse = self.compute_pixel_diff(baseline_dir, final_dir)
+
+        baseline_clip = self.compute_clip_similarity(baseline_dir, Path(dataset_path))
+        lora_clip = self.compute_clip_similarity(final_dir, Path(dataset_path))
+        delta_clip = lora_clip - baseline_clip
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sheet_path = output_dir / "comparison.png"
+        try:
+            self.create_comparison_sheet(baseline_dir, final_dir, sheet_path)
+        except FileNotFoundError:
+            sheet_path = None
+            logger.warning("Could not create comparison sheet: no matching images")
+
+        report = EvaluationReport(
+            mean_pixel_mae=mean_mae,
+            mean_pixel_mse=mean_mse,
+            baseline_clip_sim=baseline_clip,
+            lora_clip_sim=lora_clip,
+            delta_clip=delta_clip,
+            comparison_sheet_path=sheet_path,
+        )
+
+        logger.info(
+            "Evaluation complete: pixel_mae=%.2f clip_baseline=%.4f clip_lora=%.4f delta_clip=%.4f",
+            mean_mae,
+            baseline_clip,
+            lora_clip,
+            delta_clip,
+        )
+        return report
