@@ -17,6 +17,12 @@
   - 优先保障端到端闭环：`validate → train → export`。
   - 避免“多脚本入口 + 参数爆炸”的演化路径。
 
+## 代码风格约束
+
+- **代码注释、docstring、日志消息一律使用英文**。设计文档（`docs/`）可中英混用。
+- 格式化: `black`（line-length 100）；Lint: `ruff`（line-length 100, target py310）。
+- 类型注解: 使用 Python 3.10+ 内置泛型（`list[str]`、`dict[str, Any]`、`X | None`）。
+
 ## 执行约束（适用于后续实现）
 
 - 保持**单入口**（CLI）与**单配置源**（YAML）为 MVP 默认路径。
