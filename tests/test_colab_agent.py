@@ -7,11 +7,10 @@ from PIL import Image
 
 from src.lora_trainer.colab_agent import (
     apply_trigger_token,
-    compare_image_dirs,
-    create_comparison_sheet,
     extract_log_highlights,
     validate_image_caption_pairs,
 )
+from src.lora_trainer.evaluator import TrainingEvaluator
 
 
 def test_validate_image_caption_pairs_detects_missing_caption(tmp_path: Path) -> None:
@@ -39,8 +38,8 @@ def test_apply_trigger_token_updates_only_non_prefixed_files(tmp_path: Path) -> 
     assert (tmp_path / "y.txt").read_text(encoding="utf-8") == "f3rn_char, portrait"
 
 
-def test_compare_image_dirs_returns_metrics(tmp_path: Path) -> None:
-    """Image comparison should return non-zero pair count and finite metrics."""
+def test_compute_pixel_diff_returns_metrics(tmp_path: Path) -> None:
+    """Image comparison should return non-zero metrics for matching images."""
     ref_dir = tmp_path / "ref"
     cand_dir = tmp_path / "cand"
     ref_dir.mkdir()
@@ -53,11 +52,11 @@ def test_compare_image_dirs_returns_metrics(tmp_path: Path) -> None:
     Image.fromarray(ref_img).save(ref_dir / "sample.png")
     Image.fromarray(cand_img).save(cand_dir / "sample.png")
 
-    summary = compare_image_dirs(ref_dir, cand_dir)
+    evaluator = TrainingEvaluator(device="cpu")
+    mean_mae, mean_mse = evaluator.compute_pixel_diff(ref_dir, cand_dir)
 
-    assert summary.matched_pairs == 1
-    assert summary.mean_mae > 0
-    assert summary.mean_mse > 0
+    assert mean_mae > 0
+    assert mean_mse > 0
 
 
 def test_create_comparison_sheet_builds_image(tmp_path: Path) -> None:
@@ -74,7 +73,8 @@ def test_create_comparison_sheet_builds_image(tmp_path: Path) -> None:
     Image.fromarray(ref_img).save(ref_dir / "sample.png")
     Image.fromarray(cand_img).save(cand_dir / "sample.png")
 
-    result = create_comparison_sheet(ref_dir, cand_dir, out_path, max_pairs=4)
+    evaluator = TrainingEvaluator(device="cpu")
+    result = evaluator.create_comparison_sheet(ref_dir, cand_dir, out_path, max_pairs=4)
 
     assert result == out_path
     assert out_path.exists()

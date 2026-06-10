@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
-import numpy as np
-from PIL import Image
+from src.lora_trainer.evaluator import TrainingEvaluator
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
@@ -26,15 +25,6 @@ class PairValidationResult:
     image_count: int
     missing_caption_count: int
     missing_caption_files: list[str]
-
-
-@dataclass
-class ImageComparisonSummary:
-    """Aggregate image comparison statistics."""
-
-    matched_pairs: int
-    mean_mae: float
-    mean_mse: float
 
 
 @dataclass
@@ -102,101 +92,6 @@ def apply_trigger_token(dataset_root: Path, trigger_token: str) -> int:
         txt_path.write_text(new_text, encoding="utf-8")
         updated += 1
     return updated
-
-
-def compare_image_dirs(reference_dir: Path, candidate_dir: Path) -> ImageComparisonSummary:
-    """Compare images by filename intersection and return MAE/MSE summary."""
-    ref_images = {
-        path.name: path
-        for path in reference_dir.glob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    }
-    cand_images = {
-        path.name: path
-        for path in candidate_dir.glob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    }
-
-    names = sorted(set(ref_images.keys()) & set(cand_images.keys()))
-    if not names:
-        return ImageComparisonSummary(matched_pairs=0, mean_mae=0.0, mean_mse=0.0)
-
-    mae_values: list[float] = []
-    mse_values: list[float] = []
-
-    for name in names:
-        ref = np.asarray(Image.open(ref_images[name]).convert("RGB"), dtype=np.float32)
-        cand = np.asarray(Image.open(cand_images[name]).convert("RGB"), dtype=np.float32)
-        if ref.shape != cand.shape:
-            min_h = min(ref.shape[0], cand.shape[0])
-            min_w = min(ref.shape[1], cand.shape[1])
-            ref = ref[:min_h, :min_w, :]
-            cand = cand[:min_h, :min_w, :]
-
-        diff = ref - cand
-        mae_values.append(float(np.mean(np.abs(diff))))
-        mse_values.append(float(np.mean(diff * diff)))
-
-    return ImageComparisonSummary(
-        matched_pairs=len(names),
-        mean_mae=float(np.mean(mae_values)),
-        mean_mse=float(np.mean(mse_values)),
-    )
-
-
-def create_comparison_sheet(
-    reference_dir: Path,
-    candidate_dir: Path,
-    output_path: Path,
-    max_pairs: int = 8,
-) -> Path:
-    """Create a side-by-side comparison sheet for matching sample images."""
-    ref_images = {
-        path.name: path
-        for path in reference_dir.glob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    }
-    cand_images = {
-        path.name: path
-        for path in candidate_dir.glob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    }
-
-    names = sorted(set(ref_images.keys()) & set(cand_images.keys()))[:max_pairs]
-    if not names:
-        raise FileNotFoundError("No matching images available for comparison sheet")
-
-    panels: list[Image.Image] = []
-    for name in names:
-        ref = Image.open(ref_images[name]).convert("RGB")
-        cand = Image.open(cand_images[name]).convert("RGB")
-        if ref.size != cand.size:
-            size = (
-                min(ref.size[0], cand.size[0]),
-                min(ref.size[1], cand.size[1]),
-            )
-            ref = ref.resize(size)
-            cand = cand.resize(size)
-
-        width = ref.width + cand.width
-        height = max(ref.height, cand.height) + 28
-        canvas = Image.new("RGB", (width, height), "white")
-        canvas.paste(ref, (0, 28))
-        canvas.paste(cand, (ref.width, 28))
-        panels.append(canvas)
-
-    sheet_width = max(panel.width for panel in panels)
-    sheet_height = sum(panel.height for panel in panels)
-    sheet = Image.new("RGB", (sheet_width, sheet_height), "#f5f5f5")
-
-    y = 0
-    for panel in panels:
-        sheet.paste(panel, (0, y))
-        y += panel.height
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    sheet.save(output_path)
-    return output_path
 
 
 def extract_log_highlights(log_path: Path, max_lines: int = 80) -> str:
@@ -403,12 +298,19 @@ def main() -> None:
     comparison: dict[str, Any] | None = None
     comparison_sheet_path: str | None = None
     if args.reference_samples_dir:
-        compared = compare_image_dirs(args.reference_samples_dir, run_path / "samples")
-        comparison = asdict(compared)
-        sheet_path = args.report_path.with_name(f"{args.report_path.stem}.comparison.png")
-        comparison_sheet_path = str(
-            create_comparison_sheet(args.reference_samples_dir, run_path / "samples", sheet_path)
+        evaluator = TrainingEvaluator(device="cpu")
+        mae, mse = evaluator.compute_pixel_diff(
+            args.reference_samples_dir, run_path / "samples"
         )
+        comparison = {"matched_pairs": 0, "mean_mae": mae, "mean_mse": mse}
+        sheet_path = args.report_path.with_name(f"{args.report_path.stem}.comparison.png")
+        try:
+            evaluator.create_comparison_sheet(
+                args.reference_samples_dir, run_path / "samples", sheet_path
+            )
+            comparison_sheet_path = str(sheet_path)
+        except FileNotFoundError:
+            comparison_sheet_path = None
 
     quantitative_analysis = {
         **asdict(analysis),
