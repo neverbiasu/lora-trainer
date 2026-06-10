@@ -299,10 +299,19 @@ def main() -> None:
     comparison_sheet_path: str | None = None
     if args.reference_samples_dir:
         evaluator = TrainingEvaluator(device="cpu")
-        mae, mse = evaluator.compute_pixel_diff(
-            args.reference_samples_dir, run_path / "samples"
-        )
-        comparison = {"matched_pairs": 0, "mean_mae": mae, "mean_mse": mse}
+        mae, mse = evaluator.compute_pixel_diff(args.reference_samples_dir, run_path / "samples")
+        baseline_imgs = {
+            p.name
+            for p in args.reference_samples_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        }
+        final_imgs = {
+            p.name
+            for p in (run_path / "samples").iterdir()
+            if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        }
+        matched = len(baseline_imgs & final_imgs)
+        comparison = {"matched_pairs": matched, "mean_mae": mae, "mean_mse": mse}
         sheet_path = args.report_path.with_name(f"{args.report_path.stem}.comparison.png")
         try:
             evaluator.create_comparison_sheet(

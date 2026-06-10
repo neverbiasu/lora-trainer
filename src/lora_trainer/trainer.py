@@ -620,7 +620,7 @@ class Trainer:
                 logger.info(
                     "Evaluation: pixel_mae=%.2f delta_clip=%.4f",
                     eval_report.mean_pixel_mae,
-                    eval_report.delta_clip or 0.0,
+                    eval_report.delta_clip if eval_report.delta_clip is not None else 0.0,
                 )
 
         lora_delta_metrics = self._compute_lora_delta_metrics()

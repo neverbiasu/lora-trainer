@@ -217,9 +217,17 @@ class TrainingEvaluator:
         """Run full evaluation: pixel diff + CLIPScore + comparison sheet."""
         mean_mae, mean_mse = self.compute_pixel_diff(baseline_dir, final_dir)
 
-        baseline_clip = self.compute_clip_similarity(baseline_dir, Path(dataset_path))
-        lora_clip = self.compute_clip_similarity(final_dir, Path(dataset_path))
-        delta_clip = lora_clip - baseline_clip
+        baseline_clip: float | None = None
+        lora_clip: float | None = None
+        delta_clip: float | None = None
+        try:
+            baseline_clip = self.compute_clip_similarity(baseline_dir, Path(dataset_path))
+            lora_clip = self.compute_clip_similarity(final_dir, Path(dataset_path))
+            delta_clip = lora_clip - baseline_clip
+        except FileNotFoundError:
+            logger.warning("CLIPScore skipped: no images found in dataset path '%s'", dataset_path)
+        except Exception:
+            logger.exception("CLIPScore computation failed; continuing without CLIP metrics")
 
         output_dir.mkdir(parents=True, exist_ok=True)
         sheet_path = output_dir / "comparison.png"
