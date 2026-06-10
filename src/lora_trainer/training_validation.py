@@ -77,4 +77,28 @@ def evaluate_training_effectiveness(
             )
         )
 
+    # -- Visual diff criteria (only checked when present in metrics) ----------
+
+    min_pixel_mae = validation_cfg.get("min_pixel_mae")
+    if min_pixel_mae is not None:
+        pixel_mae = metrics.get("mean_pixel_mae")
+        if pixel_mae is not None and float(pixel_mae) < float(min_pixel_mae):
+            reasons.append(
+                "mean_pixel_mae={:.4f} is below min_pixel_mae={:.4f}; "
+                "LoRA may not have changed model output".format(
+                    float(pixel_mae), float(min_pixel_mae)
+                )
+            )
+
+    min_delta_clip = validation_cfg.get("min_delta_clip")
+    if min_delta_clip is not None:
+        delta_clip = metrics.get("delta_clip")
+        if delta_clip is not None and float(delta_clip) < float(min_delta_clip):
+            reasons.append(
+                "delta_clip={:.4f} is below min_delta_clip={:.4f}; "
+                "LoRA did not move outputs closer to the target concept".format(
+                    float(delta_clip), float(min_delta_clip)
+                )
+            )
+
     return TrainingEffectivenessReport(passed=len(reasons) == 0, reasons=reasons)
