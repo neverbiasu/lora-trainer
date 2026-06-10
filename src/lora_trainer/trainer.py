@@ -19,9 +19,11 @@ from tqdm import tqdm
 
 from src.lora_trainer.data_loader import create_data_loader
 from src.lora_trainer.errors import IneffectiveTrainingError
+from src.lora_trainer.evaluator import TrainingEvaluator
 from src.lora_trainer.lora import LoRAAdapter
 from src.lora_trainer.model_adapter import SD15ModelAdapter
 from src.lora_trainer.run_manager import RunManager
+from src.lora_trainer.sampler import SampleGenerator, SampleGrid
 from src.lora_trainer.training_validation import evaluate_training_effectiveness
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,7 @@ class Trainer:
         self.amp_autocast_enabled = False
         self.amp_dtype: torch.dtype | None = None
         self.grad_scaler: torch.amp.GradScaler | None = None
+        self._sample_grid: SampleGrid | None = None
 
     def start(self, resume: str | None = None) -> Path:
         """Initialize training: load models, inject LoRA, setup optimizer."""
@@ -217,6 +220,15 @@ class Trainer:
                     logger.info("Restored global_step=%d from filename", self.global_step)
 
         logger.info("Training ready: max_steps=%d device=%s", max_steps, self.device)
+
+        # Generate baseline samples (LoRA weights are zero-init, output == base model)
+        self._sample_grid = self._build_sample_grid()
+        if self._sample_grid is not None and self.model_adapter is not None:
+            sampler = SampleGenerator(self.model_adapter, self._sample_grid)
+            baseline_dir = cast(Path, run_dir) / "samples" / "baseline"
+            logger.info("Generating baseline samples to %s", baseline_dir)
+            sampler.generate_grid(baseline_dir)
+
         return run_dir
 
     def _configure_precision(self) -> None:
@@ -268,6 +280,42 @@ class Trainer:
         if base_model == "sd15":
             return "runwayml/stable-diffusion-v1-5"
         raise ValueError(f"Unsupported base_model: {base_model}")
+
+    def _build_sample_grid(self) -> SampleGrid | None:
+        """Build a SampleGrid from config. Returns None if sampling is disabled."""
+        sampling_cfg = self.config.get("sampling", {})
+        sample_every = sampling_cfg.get("sample_every_n_steps", 0)
+
+        # Fallback: check old config paths for backward compat
+        if not sample_every:
+            sample_every = self.config.get("training", {}).get("sample_every_n_steps", 0)
+        if not sample_every:
+            sample_every = self.config.get("validation", {}).get("every_n_steps", 0)
+
+        if not sample_every:
+            return None
+
+        prompts = list(sampling_cfg.get("prompts", []))
+        if not prompts:
+            # Fallback: pick up to 3 captions from the dataset
+            dataset_path = self.config.get("data", {}).get("dataset_path")
+            if dataset_path:
+                caption_files = sorted(Path(dataset_path).glob("*.txt"))[:3]
+                for cf in caption_files:
+                    text = cf.read_text(encoding="utf-8").strip()
+                    if text:
+                        prompts.append(text)
+            if not prompts:
+                prompts = ["a photo"]
+
+        return SampleGrid(
+            prompts=prompts,
+            seeds=sampling_cfg.get("seeds", [42, 123, 999]),
+            num_inference_steps=sampling_cfg.get("num_inference_steps", 20),
+            guidance_scale=sampling_cfg.get("guidance_scale", 7.5),
+            width=self.config.get("data", {}).get("resolution", 512),
+            height=self.config.get("data", {}).get("resolution", 512),
+        )
 
     def train(self, resume: str | None = None) -> None:
         """Main training loop - manages start -> loop -> end lifecycle."""
@@ -357,6 +405,27 @@ class Trainer:
                 if self.global_step % save_every == 0:
                     logger.info("Saving checkpoint at step %d", self.global_step)
                     self.save_checkpoint(self.global_step)
+
+                # Intermediate sampling
+                sample_every = self.config.get("sampling", {}).get(
+                    "sample_every_n_steps", 0
+                )
+                if (
+                    sample_every > 0
+                    and self._sample_grid is not None
+                    and self.model_adapter is not None
+                    and self.global_step > 0
+                    and self.global_step % sample_every == 0
+                ):
+                    step_sample_dir = (
+                        cast(Path, run_manager.run_dir)
+                        / "samples"
+                        / f"step_{self.global_step:04d}"
+                    )
+                    logger.info("Generating intermediate samples at step %d", self.global_step)
+                    SampleGenerator(self.model_adapter, self._sample_grid).generate_grid(
+                        step_sample_dir
+                    )
 
                 self.global_step += 1
                 logger.debug("step=%d/%d loss=%f (incremented)", self.global_step, max_steps, loss)
@@ -526,6 +595,38 @@ class Trainer:
         self.lora_adapter.export_weights(str(export_path), metadata=metadata)
         logger.info("Exported final LoRA weights to %s", export_path)
 
+        # Generate final samples and run evaluation
+        eval_metrics: dict[str, Any] = {}
+        if self._sample_grid is not None and self.model_adapter is not None:
+            run_dir_path = cast(Path, cast(RunManager, self.run_manager).run_dir)
+            final_dir = run_dir_path / "samples" / "final"
+            baseline_dir = run_dir_path / "samples" / "baseline"
+
+            logger.info("Generating final samples to %s", final_dir)
+            SampleGenerator(self.model_adapter, self._sample_grid).generate_grid(final_dir)
+
+            if baseline_dir.exists():
+                dataset_path = self.config.get("data", {}).get("dataset_path", "")
+                evaluator = TrainingEvaluator(device=str(self.device))
+                eval_report = evaluator.evaluate(
+                    baseline_dir=baseline_dir,
+                    final_dir=final_dir,
+                    dataset_path=dataset_path,
+                    output_dir=run_dir_path / "samples",
+                )
+                eval_metrics = {
+                    "mean_pixel_mae": eval_report.mean_pixel_mae,
+                    "mean_pixel_mse": eval_report.mean_pixel_mse,
+                    "baseline_clip_sim": eval_report.baseline_clip_sim,
+                    "lora_clip_sim": eval_report.lora_clip_sim,
+                    "delta_clip": eval_report.delta_clip,
+                }
+                logger.info(
+                    "Evaluation: pixel_mae=%.2f delta_clip=%.4f",
+                    eval_report.mean_pixel_mae,
+                    eval_report.delta_clip or 0.0,
+                )
+
         lora_delta_metrics = self._compute_lora_delta_metrics()
         loss_ratio = None
         if self.first_loss is not None and self.first_loss > 0:
@@ -537,6 +638,7 @@ class Trainer:
             "first_loss": self.first_loss,
             "loss_ratio": loss_ratio,
             **lora_delta_metrics,
+            **eval_metrics,
         }
 
         report = evaluate_training_effectiveness(metrics, self.config)
