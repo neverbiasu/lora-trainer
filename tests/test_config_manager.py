@@ -6,7 +6,7 @@ import argparse
 
 import pytest
 
-from src.lora_trainer.config_manager import ConfigManager
+from src.lora_trainer.config_manager import DEFAULTS, ConfigManager
 from src.lora_trainer.errors import InvalidConfigError, MissingRequiredFieldError
 
 
@@ -96,3 +96,17 @@ def test_validate_or_raise_invalid_value(tmp_path) -> None:
 
     with pytest.raises(InvalidConfigError):
         manager.validate_or_raise(config)
+
+
+def test_sampling_defaults_exist():
+    assert "sampling" in DEFAULTS
+    sampling = DEFAULTS["sampling"]
+    assert sampling["seeds"] == [42, 123, 999]
+    assert sampling["sample_every_n_steps"] == 250
+    assert sampling["num_inference_steps"] == 20
+    assert sampling["guidance_scale"] == 7.5
+
+
+def test_sampling_prompts_default_is_empty():
+    """prompts defaults to empty list; trainer fills from dataset captions at runtime."""
+    assert DEFAULTS["sampling"]["prompts"] == []

@@ -54,6 +54,15 @@ DEFAULTS: dict[str, Any] = {
         "min_lora_delta_l2": 1e-6,
         "max_loss_ratio": 1.2,
         "require_loss_drop": False,
+        "min_pixel_mae": None,
+        "min_delta_clip": None,
+    },
+    "sampling": {
+        "prompts": [],
+        "seeds": [42, 123, 999],
+        "num_inference_steps": 20,
+        "guidance_scale": 7.5,
+        "sample_every_n_steps": 250,
     },
 }
 
