@@ -1,0 +1,48 @@
+# examples/config_fern_clipscore.yaml
+# Full example: SD1.5 LoRA training with CLIPScore validation feedback loop.
+# Uses the fern_new dataset (28 images, 1024x1024, tag-style captions).
+
+model:
+  base_model: sd15
+
+data:
+  dataset_path: ./fern_dataset    # path to extracted fern_new images + captions
+  resolution: 512
+  cache_latents: false
+
+lora:
+  rank: 32
+  alpha: 32
+  apply_text_encoder: true
+
+training:
+  learning_rate: 1e-4
+  text_encoder_lr: 5e-5
+  lr_scheduler: constant_with_warmup
+  lr_warmup_steps: 100
+  min_snr_gamma: 5.0
+  batch_size: 1
+  max_train_steps: 1000
+  mixed_precision: fp16
+  seed: 42
+  save_every_n_steps: 500
+
+sampling:
+  prompts:
+    - "fern, purple hair, anime girl, portrait, elf"
+    - "fern, purple hair, elf mage, fantasy, serious expression"
+    - "a girl with long purple hair, anime, illustration"
+  seeds: [42, 123, 999]
+  num_inference_steps: 20
+  guidance_scale: 7.5
+  sample_every_n_steps: 250
+
+validation:
+  assert_effective_training: true
+  max_loss_ratio: 1.5
+  min_lora_delta_l2: 1e-6
+  min_pixel_mae: 0.02
+  min_delta_clip: 0.01
+
+output:
+  output_dir: ./runs/fern_clipscore

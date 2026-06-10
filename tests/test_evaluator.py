@@ -83,9 +83,7 @@ def test_clip_similarity_returns_float(tmp_path: Path):
     mock_features = mock_features / mock_features.norm(dim=-1, keepdim=True)
 
     with patch.object(evaluator, "_get_clip_image_embedding", return_value=mock_features[0]):
-        sim = evaluator.compute_clip_similarity(
-            generated_dir=gen_dir, reference_dir=ref_dir
-        )
+        sim = evaluator.compute_clip_similarity(generated_dir=gen_dir, reference_dir=ref_dir)
 
     assert isinstance(sim, float)
     assert -1.0 <= sim <= 1.0

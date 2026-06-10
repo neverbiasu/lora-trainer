@@ -51,9 +51,7 @@ class TrainingEvaluator:
 
     # -- Pixel diff ----------------------------------------------------------
 
-    def compute_pixel_diff(
-        self, baseline_dir: Path, final_dir: Path
-    ) -> tuple[float, float]:
+    def compute_pixel_diff(self, baseline_dir: Path, final_dir: Path) -> tuple[float, float]:
         """Compute mean MAE and MSE between matched images in two directories.
 
         Returns (mean_mae, mean_mse). Only files with the same name are compared.
@@ -70,12 +68,8 @@ class TrainingEvaluator:
         mse_values: list[float] = []
 
         for name in names:
-            ref = np.asarray(
-                Image.open(baseline_images[name]).convert("RGB"), dtype=np.float32
-            )
-            cand = np.asarray(
-                Image.open(final_images[name]).convert("RGB"), dtype=np.float32
-            )
+            ref = np.asarray(Image.open(baseline_images[name]).convert("RGB"), dtype=np.float32)
+            cand = np.asarray(Image.open(final_images[name]).convert("RGB"), dtype=np.float32)
             # Handle size mismatch by cropping to the smaller dimensions
             min_h = min(ref.shape[0], cand.shape[0])
             min_w = min(ref.shape[1], cand.shape[1])
@@ -174,8 +168,7 @@ class TrainingEvaluator:
 
         dataset_dir = Path(dataset_path)
         image_paths = sorted(
-            p for p in dataset_dir.iterdir()
-            if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+            p for p in dataset_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
         )
         if not image_paths:
             raise FileNotFoundError(f"No images found in dataset: {dataset_path}")
@@ -189,9 +182,7 @@ class TrainingEvaluator:
         centroid = centroid / centroid.norm()
         return centroid
 
-    def compute_clip_similarity(
-        self, generated_dir: Path, reference_dir: Path
-    ) -> float:
+    def compute_clip_similarity(self, generated_dir: Path, reference_dir: Path) -> float:
         """Compute mean CLIP cosine similarity between generated images and reference centroid.
 
         Returns average cosine similarity as a float in [-1, 1].

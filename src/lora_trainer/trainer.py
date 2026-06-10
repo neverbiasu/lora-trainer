@@ -407,9 +407,7 @@ class Trainer:
                     self.save_checkpoint(self.global_step)
 
                 # Intermediate sampling
-                sample_every = self.config.get("sampling", {}).get(
-                    "sample_every_n_steps", 0
-                )
+                sample_every = self.config.get("sampling", {}).get("sample_every_n_steps", 0)
                 if (
                     sample_every > 0
                     and self._sample_grid is not None
@@ -418,9 +416,7 @@ class Trainer:
                     and self.global_step % sample_every == 0
                 ):
                     step_sample_dir = (
-                        cast(Path, run_manager.run_dir)
-                        / "samples"
-                        / f"step_{self.global_step:04d}"
+                        cast(Path, run_manager.run_dir) / "samples" / f"step_{self.global_step:04d}"
                     )
                     logger.info("Generating intermediate samples at step %d", self.global_step)
                     SampleGenerator(self.model_adapter, self._sample_grid).generate_grid(
