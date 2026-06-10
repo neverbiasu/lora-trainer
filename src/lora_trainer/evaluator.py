@@ -6,10 +6,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PIL import Image
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +149,6 @@ class TrainingEvaluator:
         if self._clip_model is not None:
             return
 
-        import torch
         from transformers import CLIPModel, CLIPProcessor
 
         model_name = "openai/clip-vit-base-patch32"
@@ -205,7 +207,9 @@ class TrainingEvaluator:
         similarities: list[float] = []
         for name, path in gen_images.items():
             emb = self._get_clip_image_embedding(path)
-            sim = float(torch.dot(emb, centroid).item())
+            # Clamp to [-1, 1] to guard against floating-point rounding
+            # pushing the cosine similarity slightly outside its valid range.
+            sim = float(torch.dot(emb, centroid).clamp(-1.0, 1.0).item())
             similarities.append(sim)
 
         return float(np.mean(similarities))

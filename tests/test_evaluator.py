@@ -2,9 +2,10 @@
 """Tests for TrainingEvaluator."""
 
 from pathlib import Path
+from unittest.mock import patch
 
-import numpy as np
 import pytest
+import torch
 from PIL import Image
 
 from src.lora_trainer.evaluator import TrainingEvaluator
@@ -65,10 +66,6 @@ def test_comparison_sheet_no_matching_files(tmp_path: Path):
     evaluator = TrainingEvaluator(device="cpu")
     with pytest.raises(FileNotFoundError, match="No matching"):
         evaluator.create_comparison_sheet(baseline_dir, final_dir, tmp_path / "out.png")
-
-
-from unittest.mock import patch, MagicMock
-import torch
 
 
 def test_clip_similarity_returns_float(tmp_path: Path):
