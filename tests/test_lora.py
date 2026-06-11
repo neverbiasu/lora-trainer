@@ -51,6 +51,17 @@ class _TinyUNet(nn.Module):
         self.ff = nn.Linear(64, 64)  # should NOT be injected
 
 
+class _TinyTextEncoder(nn.Module):
+    """Minimal CLIP-text-encoder-like model with a nested attention projection."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Module()
+        self.encoder.layers = nn.ModuleList([nn.Module()])
+        self.encoder.layers[0].self_attn = nn.Module()
+        self.encoder.layers[0].self_attn.k_proj = nn.Linear(32, 32)
+
+
 def test_apply_to_injects_target_modules() -> None:
     """apply_to() should inject LoRA into attention projection layers."""
     unet = _TinyUNet()
@@ -182,3 +193,60 @@ def test_load_weights_unsupported_extension_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unsupported"):
         adapter.load_weights(str(tmp_path / "weights.xyz"))
+
+
+# ---------------------------------------------------------------------------
+# LoRAAdapter — Kohya/Diffusers key format conversion
+# ---------------------------------------------------------------------------
+
+
+def test_export_weights_uses_kohya_prefixes(tmp_path: Path) -> None:
+    """export_weights() should prefix UNet keys with lora_unet_ and text encoder
+    keys with lora_te_text_model_."""
+    from safetensors.torch import load_file
+
+    unet = _TinyUNet()
+    text_encoder = _TinyTextEncoder()
+    adapter = LoRAAdapter(rank=4, alpha=4.0)
+    adapter.apply_to(
+        text_encoder=text_encoder,
+        unet=unet,
+        apply_text_encoder=True,
+        apply_unet=True,
+        target_modules=("to_q", "to_k", "to_v", "k_proj"),
+        strict=False,
+    )
+
+    save_path = str(tmp_path / "lora_kohya.safetensors")
+    adapter.export_weights(save_path)
+
+    keys = list(load_file(save_path).keys())
+    assert any(k.startswith("lora_unet_") for k in keys)
+    assert any(k.startswith("lora_te_text_model_") for k in keys)
+
+
+def test_load_weights_maps_kohya_prefixes_back(tmp_path: Path) -> None:
+    """load_weights() should map lora_unet_/lora_te_text_model_ prefixes back
+    to the internal lora_modules. layout."""
+    unet = _TinyUNet()
+    text_encoder = _TinyTextEncoder()
+    adapter = LoRAAdapter(rank=4, alpha=4.0)
+    adapter.apply_to(
+        text_encoder=text_encoder,
+        unet=unet,
+        apply_text_encoder=True,
+        apply_unet=True,
+        target_modules=("to_q", "to_k", "to_v", "k_proj"),
+        strict=False,
+    )
+
+    save_path = str(tmp_path / "lora_kohya_roundtrip.safetensors")
+    adapter.export_weights(save_path)
+
+    with torch.no_grad():
+        for p in adapter.parameters():
+            p.fill_(99.0)
+
+    adapter.load_weights(save_path, strict=True)
+    param_values = [p.mean().item() for p in adapter.parameters()]
+    assert all(v != 99.0 for v in param_values)

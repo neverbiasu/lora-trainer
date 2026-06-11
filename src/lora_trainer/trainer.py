@@ -475,7 +475,11 @@ class Trainer:
         )
         noisy_latents = noise_scheduler.add_noise(latents, noise, cast(Any, timesteps))
 
-        with torch.no_grad(), self._autocast_context():
+        # Only use no_grad for text encoder if we aren't training it
+        apply_te = self.config.get("lora", {}).get("apply_text_encoder", True)
+        te_context = nullcontext() if apply_te else torch.no_grad()
+
+        with te_context, self._autocast_context():
             text_embeddings = self.model_adapter.encode_prompt(list(captions))
 
         with self._autocast_context():

@@ -65,6 +65,12 @@ class LoRAAdapter(nn.Module):
             "ff.net.2",
             "proj_in",
             "proj_out",
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "out_proj",
+            "fc1",
+            "fc2",
         )
 
     def _is_target_module(
@@ -166,8 +172,9 @@ class LoRAAdapter(nn.Module):
     def load_weights(self, weights_path: str, strict: bool = False) -> None:
         """Load LoRA weights from a checkpoint (safetensors or torch).
 
-        Keys in the checkpoint must match the format produced by export_weights,
-        i.e. the full state_dict layout with 'lora_modules.' prefix.
+        Accepts both the raw lora_modules.* layout and the Kohya/Diffusers
+        layout (lora_unet_*, lora_te_text_model_*), converting the latter
+        back to the raw format before loading.
         """
         if weights_path.endswith(".safetensors"):
             state_dict = dict(load_safetensors(weights_path))
@@ -180,7 +187,17 @@ class LoRAAdapter(nn.Module):
                 "Expected .safetensors, .pt, .pth, .bin, or .ckpt."
             )
 
-        incompatible = self.load_state_dict(state_dict, strict=strict)
+        # Handle mapped Diffusers/Kohya formats by converting back to raw module format
+        mapped_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("lora_unet_"):
+                mapped_state_dict["lora_modules." + k[len("lora_unet_") :]] = v
+            elif k.startswith("lora_te_text_model_"):
+                mapped_state_dict["lora_modules." + k[len("lora_te_text_model_") :]] = v
+            else:
+                mapped_state_dict[k] = v
+
+        incompatible = self.load_state_dict(mapped_state_dict, strict=strict)
         if incompatible.missing_keys:
             logger.warning(
                 "load_weights: missing keys in checkpoint: %s",
@@ -210,9 +227,26 @@ class LoRAAdapter(nn.Module):
         """
         state_dict = self.state_dict()
 
+        # Convert to Kohya/Diffusers compatible format
+        kohya_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("lora_modules."):
+                suffix = k[len("lora_modules.") :]
+                if (
+                    suffix.startswith("encoder_")
+                    or suffix.startswith("embeddings_")
+                    or suffix.startswith("final_layer_norm_")
+                ):
+                    new_k = "lora_te_text_model_" + suffix
+                else:
+                    new_k = "lora_unet_" + suffix
+                kohya_state_dict[new_k] = v
+            else:
+                kohya_state_dict[k] = v
+
         if save_path.endswith(".safetensors"):
             if metadata is None:
                 metadata = {}
-            save_safetensors(state_dict, save_path, metadata=metadata)
+            save_safetensors(kohya_state_dict, save_path, metadata=metadata)
         else:
-            torch.save(state_dict, save_path)
+            torch.save(kohya_state_dict, save_path)
