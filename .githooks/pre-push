@@ -5,7 +5,8 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 echo "Running pre-push quality gate..."
-ruff check .
-black --check .
+# Only lint git-tracked files to avoid untracked scratch scripts
+git ls-files '*.py' '*.ipynb' | xargs ruff check
+black --check src/ tests/ notebooks/
 pytest tests -q
 echo "Pre-push quality gate passed."

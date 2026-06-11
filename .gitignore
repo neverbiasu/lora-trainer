@@ -60,6 +60,12 @@ examples/fern/raw/
 examples/fern/dataset_512/
 fern_dataset/
 
+# Debug / scratch scripts
+check_*.py
+test_keys.py
+test_pipe.py
+analysis_artifacts/
+
 # Jupyter
 .ipynb_checkpoints/
 !notebooks/*.ipynb
