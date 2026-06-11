@@ -328,6 +328,7 @@ class SD15ModelAdapter(ModelAdapter):
         )
         # Move to device without changing dtype - avoid pipe.to(device) which may cast
         pipe = pipe.to(self.device)
+        pipe.enable_attention_slicing()
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
         result = cast(
@@ -344,6 +345,7 @@ class SD15ModelAdapter(ModelAdapter):
         )
         pil_image = result.images[0]
         del pipe
+        torch.cuda.empty_cache()
 
         # Restore model dtypes in case pipeline.to() changed them
         self.unet.to(dtype=unet_dtype)
