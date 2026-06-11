@@ -1,6 +1,7 @@
 """ModelAdapter - model loading and conditioning construction"""
 
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, List, Mapping, Tuple, cast
 
@@ -217,8 +218,15 @@ class SD15ModelAdapter(ModelAdapter):
         """SD1.5 LoRA target modules"""
         return ["to_q", "to_k", "to_v", "to_out.0"]
 
-    def encode_prompt(self, prompts: List[str]) -> torch.Tensor:
-        """Encode text to embedding"""
+    def encode_prompt(self, prompts: List[str], enable_grad: bool = False) -> torch.Tensor:
+        """Encode text to embedding.
+
+        Args:
+            prompts: List of text prompts to encode.
+            enable_grad: If True, allow gradient computation through the text
+                encoder (needed when training text encoder LoRA). Default False
+                wraps the call in torch.no_grad() for inference efficiency.
+        """
         self._ensure_loaded()
         assert self.tokenizer is not None
         assert self.text_encoder is not None
@@ -233,7 +241,8 @@ class SD15ModelAdapter(ModelAdapter):
         input_ids = tokens.input_ids.to(self.device)
         attention_mask = tokens.attention_mask.to(self.device)
 
-        with torch.no_grad():
+        ctx = torch.no_grad() if not enable_grad else nullcontext()
+        with ctx:
             embeddings = self.text_encoder(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -302,6 +311,11 @@ class SD15ModelAdapter(ModelAdapter):
             clip_sample=False,
             set_alpha_to_one=False,
         )
+
+        # Save model dtypes before pipeline creation (pipe.to() can change them)
+        unet_dtype = next(self.unet.parameters()).dtype
+        te_dtype = next(self.text_encoder.parameters()).dtype
+
         pipe = StableDiffusionPipeline(
             vae=self.vae,
             unet=self.unet,
@@ -311,7 +325,9 @@ class SD15ModelAdapter(ModelAdapter):
             safety_checker=None,  # type: ignore[arg-type]
             feature_extractor=None,  # type: ignore[arg-type]
             requires_safety_checker=False,
-        ).to(self.device)
+        )
+        # Move to device without changing dtype - avoid pipe.to(device) which may cast
+        pipe = pipe.to(self.device)
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
         result = cast(
@@ -328,6 +344,11 @@ class SD15ModelAdapter(ModelAdapter):
         )
         pil_image = result.images[0]
         del pipe
+
+        # Restore model dtypes in case pipeline.to() changed them
+        self.unet.to(dtype=unet_dtype)
+        self.text_encoder.to(dtype=te_dtype)
+
         return TF.to_tensor(pil_image)
 
     def _ensure_loaded(self) -> None:
