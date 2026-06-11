@@ -228,6 +228,8 @@ class Trainer:
             baseline_dir = cast(Path, run_dir) / "samples" / "baseline"
             logger.info("Generating baseline samples to %s", baseline_dir)
             sampler.generate_grid(baseline_dir)
+            # Pipeline inference can corrupt model dtypes; fix them
+            self._enforce_model_dtypes()
 
         return run_dir
 
@@ -347,6 +349,9 @@ class Trainer:
             "Training metrics tracked: step/loss/lr, final loss_ratio, lora_delta_l2, lora_delta_mean_abs"
         )
 
+        # Diagnose and fix dtype mismatches after baseline sampling
+        self._enforce_model_dtypes()
+
         progress_bar = tqdm(
             total=max_steps,
             initial=self.global_step,
@@ -422,6 +427,7 @@ class Trainer:
                     SampleGenerator(self.model_adapter, self._sample_grid).generate_grid(
                         step_sample_dir
                     )
+                    self._enforce_model_dtypes()
 
                 self.global_step += 1
                 logger.debug("step=%d/%d loss=%f (incremented)", self.global_step, max_steps, loss)
@@ -607,6 +613,7 @@ class Trainer:
 
             logger.info("Generating final samples to %s", final_dir)
             SampleGenerator(self.model_adapter, self._sample_grid).generate_grid(final_dir)
+            self._enforce_model_dtypes()
 
             if baseline_dir.exists():
                 dataset_path = self.config.get("data", {}).get("dataset_path", "")
@@ -720,6 +727,47 @@ class Trainer:
                 "Training did not pass effectiveness gate checks",
                 suggestions=report.reasons,
             )
+
+    def _enforce_model_dtypes(self) -> None:
+        """Check and fix dtype mismatches in model parameters.
+
+        StableDiffusionPipeline can leave some parameters (especially biases)
+        in float32 even when the model was loaded in fp16. This method detects
+        and corrects such mismatches.
+        """
+        if self.unet is None or self.text_encoder is None:
+            return
+
+        expected_dtype = torch.float16 if self.mixed_precision_mode != "fp32" else torch.float32
+        fixed_count = 0
+
+        for model_name, model in [("unet", self.unet), ("text_encoder", self.text_encoder)]:
+            for name, param in model.named_parameters():
+                if param.dtype != expected_dtype:
+                    logger.warning(
+                        "Dtype mismatch: %s.%s is %s, expected %s — fixing",
+                        model_name,
+                        name,
+                        param.dtype,
+                        expected_dtype,
+                    )
+                    param.data = param.data.to(expected_dtype)
+                    fixed_count += 1
+            for name, buf in model.named_buffers():
+                if buf.is_floating_point() and buf.dtype != expected_dtype:
+                    logger.warning(
+                        "Buffer dtype mismatch: %s.%s is %s — fixing",
+                        model_name,
+                        name,
+                        buf.dtype,
+                    )
+                    buf.data = buf.data.to(expected_dtype)
+                    fixed_count += 1
+
+        if fixed_count > 0:
+            logger.warning("Fixed %d dtype mismatches in model parameters/buffers", fixed_count)
+        else:
+            logger.info("All model parameters have correct dtype (%s)", expected_dtype)
 
     def _compute_lora_delta_metrics(self) -> dict[str, float | None]:
         """Return aggregate LoRA parameter delta statistics."""

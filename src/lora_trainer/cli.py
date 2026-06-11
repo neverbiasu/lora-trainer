@@ -203,11 +203,10 @@ def main():
         print("\n⚠️  training interrupted", file=sys.stderr)
         sys.exit(130)
     except Exception as error:
-        print(f"❌ training failed: {error}", file=sys.stderr)
-        if args.verbose:
-            import traceback
+        import traceback
 
-            traceback.print_exc()
+        print(f"❌ training failed: {error}", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)
 
 
