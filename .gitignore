@@ -62,7 +62,7 @@ fern_dataset/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
+!notebooks/*.ipynb
 
 # MyPy
 .mypy_cache/
