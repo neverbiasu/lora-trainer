@@ -326,13 +326,18 @@ class SD15ModelAdapter(ModelAdapter):
             feature_extractor=None,  # type: ignore[arg-type]
             requires_safety_checker=False,
         )
+        # Temporarily cast VAE to fp16 for inference (normally float32 for training)
+        # so that UNet fp16 output latents match VAE input dtype
+        vae_dtype = next(self.vae.parameters()).dtype
+        if unet_dtype == torch.float16:
+            self.vae.to(dtype=torch.float16)
+
         pipe = pipe.to(self.device)
         pipe.enable_attention_slicing()
 
         # Enforce consistent dtypes AFTER pipe.to() which can leave stale fp32 biases
         if unet_dtype == torch.float16:
             self.unet.to(dtype=torch.float16)
-        if te_dtype == torch.float16:
             self.text_encoder.to(dtype=torch.float16)
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -352,7 +357,8 @@ class SD15ModelAdapter(ModelAdapter):
         del pipe
         torch.cuda.empty_cache()
 
-        # Restore model dtypes in case pipeline.to() changed them
+        # Restore model dtypes for training
+        self.vae.to(dtype=vae_dtype)
         self.unet.to(dtype=unet_dtype)
         self.text_encoder.to(dtype=te_dtype)
 
