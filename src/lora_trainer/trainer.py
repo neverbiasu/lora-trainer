@@ -224,11 +224,13 @@ class Trainer:
         # Generate baseline samples (LoRA weights are zero-init, output == base model)
         self._sample_grid = self._build_sample_grid()
         if self._sample_grid is not None and self.model_adapter is not None:
+            # Ensure consistent dtypes before sampling (fp16 models may have stale fp32 biases)
+            self._enforce_model_dtypes()
             sampler = SampleGenerator(self.model_adapter, self._sample_grid)
             baseline_dir = cast(Path, run_dir) / "samples" / "baseline"
             logger.info("Generating baseline samples to %s", baseline_dir)
             sampler.generate_grid(baseline_dir)
-            # Pipeline inference can corrupt model dtypes; fix them
+            # Pipeline inference can corrupt model dtypes; fix them again
             self._enforce_model_dtypes()
 
         return run_dir

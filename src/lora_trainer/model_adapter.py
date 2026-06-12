@@ -331,18 +331,20 @@ class SD15ModelAdapter(ModelAdapter):
         pipe.enable_attention_slicing()
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
-        result = cast(
-            Any,
-            pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt or None,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                width=width,
-                height=height,
-                generator=generator,
-            ),
-        )
+        # Use autocast to handle fp16/fp32 bias mismatch inside the pipeline
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+            result = cast(
+                Any,
+                pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or None,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    width=width,
+                    height=height,
+                    generator=generator,
+                ),
+            )
         pil_image = result.images[0]
         del pipe
         torch.cuda.empty_cache()
