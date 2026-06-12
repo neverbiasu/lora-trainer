@@ -16,11 +16,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install tools
+        run: pip install ruff black
 
       - name: Check
         run: ruff check src/ tests/
 
       - name: Format
-        run: ruff format --check src/ tests/
+        run: black --check src/ tests/
