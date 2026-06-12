@@ -120,6 +120,23 @@ class Trainer:
             strict=False,
         )
         logger.info("LoRA injection report: %s", lora_report)
+
+        # Cast LoRA trainable parameters to float32 (master weights).
+        # When the base model is loaded in fp16, LoRA params inherit fp16.
+        # The optimizer and GradScaler require float32 parameters;
+        # autocast handles the fp16 forward pass automatically.
+        if self.mixed_precision_mode != "fp32":
+            fp32_count = 0
+            for param in self.lora_adapter.parameters():
+                if param.requires_grad and param.dtype != torch.float32:
+                    param.data = param.data.float()
+                    fp32_count += 1
+            if fp32_count > 0:
+                logger.info(
+                    "Promoted %d LoRA parameters to float32 for optimizer compatibility",
+                    fp32_count,
+                )
+
         self.initial_lora_state = {
             key: tensor.detach().float().cpu().clone()
             for key, tensor in self.lora_adapter.state_dict().items()
@@ -745,6 +762,9 @@ class Trainer:
 
         for model_name, model in [("unet", self.unet), ("text_encoder", self.text_encoder)]:
             for name, param in model.named_parameters():
+                # Skip LoRA trainable params — they must stay float32 for the optimizer
+                if param.requires_grad:
+                    continue
                 if param.dtype != expected_dtype:
                     logger.warning(
                         "Dtype mismatch: %s.%s is %s, expected %s — fixing",
