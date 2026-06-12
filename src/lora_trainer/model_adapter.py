@@ -326,25 +326,28 @@ class SD15ModelAdapter(ModelAdapter):
             feature_extractor=None,  # type: ignore[arg-type]
             requires_safety_checker=False,
         )
-        # Move to device without changing dtype - avoid pipe.to(device) which may cast
         pipe = pipe.to(self.device)
         pipe.enable_attention_slicing()
 
+        # Enforce consistent dtypes AFTER pipe.to() which can leave stale fp32 biases
+        if unet_dtype == torch.float16:
+            self.unet.to(dtype=torch.float16)
+        if te_dtype == torch.float16:
+            self.text_encoder.to(dtype=torch.float16)
+
         generator = torch.Generator(device=self.device).manual_seed(seed)
-        # Use autocast to handle fp16/fp32 bias mismatch inside the pipeline
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16):
-            result = cast(
-                Any,
-                pipe(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt or None,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    width=width,
-                    height=height,
-                    generator=generator,
-                ),
-            )
+        result = cast(
+            Any,
+            pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt or None,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                generator=generator,
+            ),
+        )
         pil_image = result.images[0]
         del pipe
         torch.cuda.empty_cache()
