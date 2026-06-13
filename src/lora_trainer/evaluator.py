@@ -159,6 +159,10 @@ class TrainingEvaluator:
         inputs = self._clip_processor(images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
             features = self._clip_model.get_image_features(**inputs)
+        # Handle case where get_image_features returns a model output object
+        # instead of a raw tensor (varies by transformers version)
+        if not isinstance(features, torch.Tensor):
+            features = features.image_embeds if hasattr(features, "image_embeds") else features[0]
         features = features / features.norm(dim=-1, keepdim=True)
         return features[0]  # shape: (512,)
 
