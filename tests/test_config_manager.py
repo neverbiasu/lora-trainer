@@ -19,8 +19,7 @@ def test_config_manager_init() -> None:
 def test_resolve_merges_defaults_yaml_and_cli(tmp_path) -> None:
     """Resolved config follows DEFAULTS < YAML < CLI precedence."""
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        """
+    config_path.write_text("""
 config_version: "0.1.0"
 model:
     base_model: sd15
@@ -28,8 +27,7 @@ data:
     dataset_path: ./dataset
 training:
     learning_rate: 1e-4
-""".strip()
-    )
+""".strip())
 
     args = argparse.Namespace(
         dataset=tmp_path / "cli_dataset",
@@ -49,8 +47,7 @@ training:
 def test_resolve_normalizes_numeric_and_path_types(tmp_path) -> None:
     """Resolve converts numeric-like strings and Path values."""
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        """
+    config_path.write_text("""
 config_version: "0.1.0"
 model:
     base_model: sd15
@@ -64,8 +61,7 @@ training:
     max_train_steps: "1200"
 output:
     output_dir: ./output
-""".strip()
-    )
+""".strip())
 
     args = argparse.Namespace(dataset=tmp_path / "images")
     manager = ConfigManager()
