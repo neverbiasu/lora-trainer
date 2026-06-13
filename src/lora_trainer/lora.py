@@ -43,7 +43,14 @@ class LoRAModule(nn.Module):
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.scale * self.lora_up(self.lora_down(x))
+        orig_dtype = x.dtype
+        # Cast input to match LoRA weight dtype (float32) for computation,
+        # then cast output back to original dtype for compatibility with
+        # frozen model layers that may be in fp16.
+        if x.dtype != self.lora_down.weight.dtype:
+            x = x.to(self.lora_down.weight.dtype)
+        result = self.scale * self.lora_up(self.lora_down(x))
+        return result.to(orig_dtype)
 
 
 class LoRAAdapter(nn.Module):
